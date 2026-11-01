@@ -4,12 +4,11 @@
 /**
  * Rutas protegidas de PlaGesEtic.
  *
- * Todas las rutas montadas aquí ya pasan por
- * autenticación, auditoría general y filtro
- * de privacidad.
+ * Las rutas ya pasan por autenticación,
+ * auditoría general y filtro de privacidad.
  *
- * Cada operación incorpora sus controles
- * de acceso específicos.
+ * Cada operación mantiene sus controles
+ * de acceso correspondientes.
  */
 
 const { Router } = require('express');
@@ -38,9 +37,7 @@ module.exports = (pool) => {
   const router = Router();
 
   /**
-   * Registro y listado de participaciones.
-   *
-   * Estas rutas conservan sus permisos existentes.
+   * Participaciones de estudios.
    */
   router.use(
     '/estudios/:idEstudio/participaciones',
@@ -48,7 +45,7 @@ module.exports = (pool) => {
   );
 
   /**
-   * Documentos de consentimiento de un estudio.
+   * Documentos de consentimiento.
    */
   router.use(
     '/estudios/:idEstudio/documentos-consentimiento',
@@ -56,7 +53,7 @@ module.exports = (pool) => {
   );
 
   /**
-   * Administración y consulta de estudios.
+   * Gestión de estudios.
    */
   router.use(
     '/estudios',
@@ -64,8 +61,7 @@ module.exports = (pool) => {
   );
 
   /**
-   * Registro, búsqueda y desenmascaramiento
-   * autorizado de identidades.
+   * Gestión de identidades.
    */
   router.use(
     '/identidades',
@@ -73,38 +69,44 @@ module.exports = (pool) => {
   );
 
   /**
+   * ACTIVIDAD 56 + D17
+   *
    * POST /participaciones/:idParticipacion/contacto
    *
-   * Consulta excepcional de datos de contacto.
+   * Requisitos:
+   * - Evitar almacenamiento en caché.
+   * - Auditar como contacto_participante.
+   * - Resolver el estudio correspondiente.
+   * - Verificar autorización.
+   * - Permitir únicamente los cuatro campos
+   *   requeridos en la respuesta.
    *
-   * Orden de ejecución:
+   * El controlador ejecuta la auditoría previa
+   * obligatoria mediante registrarAhora(req).
    *
-   * 1. Impedir almacenamiento en caché.
-   * 2. Marcar la auditoría como desenmascaramiento.
-   * 3. Resolver el estudio de la participación.
-   * 4. Verificar permisos de acceso a identidad.
-   * 5. Validar motivo y consultar contacto.
-   *
-   * La respuesta contiene únicamente:
-   * nombre, correo y telefono.
+   * Si falla la auditoría, responde HTTP 503
+   * sin entregar datos personales.
    */
- router.post(
-  '/participaciones/:idParticipacion/contacto',
-  noAlmacenar,
-  marcarAuditoria('contacto_participante', 'desenmascarar'),
-  resolverEstudioDeParticipacion,
-  accesoContacto,
-  permitirEnRespuesta(
-    'codigo_seudonimo',
-    'nombre',
-    'correo',
-    'telefono'
-  ),
-  participacionesController.contacto
-);
+  router.post(
+    '/participaciones/:idParticipacion/contacto',
+    noAlmacenar,
+    marcarAuditoria(
+      'contacto_participante',
+      'desenmascarar'
+    ),
+    resolverEstudioDeParticipacion,
+    accesoContacto,
+    permitirEnRespuesta(
+      'codigo_seudonimo',
+      'nombre',
+      'correo',
+      'telefono'
+    ),
+    participacionesController.contacto
+  );
 
   /**
-   * Gestión de consentimientos por participación.
+   * Consulta y registro de consentimientos.
    */
   router.use(
     '/participaciones/:idParticipacion/consentimientos',
@@ -112,7 +114,7 @@ module.exports = (pool) => {
   );
 
   /**
-   * Eventos de un consentimiento.
+   * Eventos: retiro y reconsentimiento.
    */
   router.use(
     '/consentimientos/:idConsentimiento/eventos',
@@ -120,7 +122,7 @@ module.exports = (pool) => {
   );
 
   /**
-   * Consulta de auditoría.
+   * Consulta y exportación de auditoría.
    */
   router.use(auditoriaRoutes);
 
