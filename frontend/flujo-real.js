@@ -190,11 +190,25 @@
     `<tr><td><code>${id}</code></td>` + resto
       .replace('<button class="lnk" data-go="c3">Ver</button>', `<button class="lnk" data-act="stuVer" data-id="${id}">Ver participantes</button>`)
       .replace('<button class="lnk" data-go="c2">Editar</button>', `<button class="lnk" data-act="stuEdit" data-id="${id}">Editar</button>`) + '</tr>');
-  // Textos de «prototipo» → datos reales
+        // Buscador de estudios (C1): filtra las filas por código o nombre, sin llamar a la API
+  const c1Base = R.c1;
+  R.c1 = () => c1Base().replace('<div class="tw">',
+    '<div class="fld"><input id="buscaEst" type="search" placeholder="Buscar por código o nombre"></div><div class="tw">');
+  document.addEventListener('input', (e) => {
+    if (e.target.id !== 'buscaEst') return;
+    const texto = e.target.value.trim().toLowerCase();
+    document.querySelectorAll('#app .tw tr').forEach((fila, i) => {
+      if (i === 0) return; // la primera fila son los títulos
+      fila.style.display = fila.textContent.toLowerCase().includes(texto) ? '' : 'none';
+    });
+  });
+      // Textos de «prototipo» → datos reales
   const shellV = shell;
   shell = function (mc, inner) { return shellV(mc, inner).replace('· nombre ficticio', '· usuario de prueba'); };
   const a3V = R.a3;
   R.a3 = () => a3V().replace(/· PROTOTIPO/gi, '· plaGesEtic');
+    const c2V = R.c2;
+  R.c2 = () => c2V().replace(btn('Guardar', 'c1', 's'), '<button class="btn s" data-act="estGuardar">Guardar</button>');
   const c3V = R.c3;
   R.c3 = () => {
     const s = STUDIES.find((x) => x.id === S.ceId) || STUDIES[0] || { id: '—', n: '' };
@@ -656,6 +670,29 @@
       if (cur === 'act58resultado') go('a3');
     }
   });
+
+    // Guardar estudio (C2): si el código ya existe, lo edita; si no, lo crea
+  document.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-act="estGuardar"]'); if (!b) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    const datos = {};
+    if (val('cn')) datos.nombre = val('cn');
+    if (val('cd')) datos.descripcion = val('cd');
+    if (val('fi')) datos.fecha_inicio = val('fi');
+    if (val('rh')) datos.retencion_hasta = val('rh');
+    const idExistente = uuidDe(val('cc'));
+    await conEspera(async () => {
+      try {
+        if (idExistente) await api('PATCH', '/estudios/' + idExistente, datos);
+        else await api('POST', '/estudios', { codigo_estudio: val('cc'), ...datos });
+        toast('Estudio guardado.', 'ok');
+        await cargarEstudios();
+        goProto('c1');
+      } catch (err) {
+        toast(err.mensaje || 'No se pudo guardar el estudio.', 'err');
+      }
+    });
+  }, true);
   // Arranque: siempre desde el ingreso
   S.err = false; goProto('a1');
 })();
