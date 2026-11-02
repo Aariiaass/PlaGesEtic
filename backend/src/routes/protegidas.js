@@ -36,25 +36,33 @@ const participacionesController =
 module.exports = (pool) => {
   const router = Router();
 
-
+  /**
+   * Participaciones de estudios.
+   */
   router.use(
     '/estudios/:idEstudio/participaciones',
     require('./participaciones')(pool)
   );
 
-
+  /**
+   * Documentos de consentimiento.
+   */
   router.use(
     '/estudios/:idEstudio/documentos-consentimiento',
     require('./documentosConsentimiento')(pool)
   );
 
-
+  /**
+   * Gestión de estudios.
+   */
   router.use(
     '/estudios',
     require('./estudios')(pool)
   );
 
-
+  /**
+   * Gestión de identidades.
+   */
   router.use(
     '/identidades',
     require('./identidades')(pool)
@@ -97,19 +105,25 @@ module.exports = (pool) => {
     participacionesController.contacto
   );
 
-
+  /**
+   * Consulta y registro de consentimientos.
+   */
   router.use(
     '/participaciones/:idParticipacion/consentimientos',
     require('./consentimientos')(pool)
   );
 
-
+  /**
+   * Eventos: retiro y reconsentimiento.
+   */
   router.use(
     '/consentimientos/:idConsentimiento/eventos',
     require('./eventosConsentimiento')(pool)
   );
 
-
+  /**
+   * Consulta y exportación de auditoría.
+   */
   router.use(auditoriaRoutes);
 
   return router;
