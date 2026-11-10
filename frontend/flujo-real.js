@@ -9,7 +9,7 @@
  *          e inscribe → POST /identidades(/buscar), /estudios/{id}/participaciones
  *   Cerrar sesión                                                      → POST /auth/logout
  *   Cambio obligatorio de contraseña                                  → POST /auth/password
- * Las pantallas de exportación, administración y archivos siguen pendientes de integración.
+ * Administración y archivos de sesión siguen pendientes de integración; exportaciones y consentimientos PDF usan la API.
  * La experiencia continúa siendo una demo de desarrollo.
  */
 (function () {
@@ -1010,6 +1010,853 @@
     return goProto('d1');
   };
 
+
+  // ---------- ACT73_EXPORTACIONES_REAL: API real y ZIP autenticado ----------
+  // Sin endpoint de listado global: se guardan solo IDs de esta sesion;
+  // otro usuario autorizado puede consultar una solicitud con su UUID.
+  const act73ExpConocidas = new Map();
+  let act73ExpUltima = null;
+  let act73ExpSeleccionada = null;
+  const act73ExpUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const act73ExpEstados = {
+    solicitada: 'Pendiente de aprobación',
+    aprobada: 'Aprobada, preparando paquete',
+    lista: 'Lista para descargar',
+    rechazada: 'Rechazada',
+    vencida: 'Vencida'
+  };
+  const act73ExpTextoEstado = e => act73ExpEstados[e] || String(e || '—');
+  const act73ExpFecha = f => f ? new Date(f).toLocaleString('es-CL') : '—';
+  const act73ExpNombreProp = {
+    analisis: 'Análisis',
+    informe: 'Informe',
+    publicacion: 'Publicación'
+  };
+
+  function act73ExpGuardar(x) {
+    if (!x || !act73ExpUuid.test(x.id_exportacion || '')) {
+      throw new Error('La API no entregó un identificador de exportación válido.');
+    }
+    act73ExpConocidas.set(x.id_exportacion, x);
+    return x;
+  }
+
+  function act73ExpListaHTML() {
+    const items = Array.from(act73ExpConocidas.values());
+    if (!items.length) {
+      return '<div class="msg info">No hay solicitudes consultadas en esta sesión. Puedes solicitar una nueva o buscar una existente por su identificador.</div>';
+    }
+    return `<div class="tw"><table>
+      <thead><tr><th>Código</th><th>Propósito</th><th>Fecha</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <tbody>${items.map(x => `<tr>
+        <td><code>${h(x.codigo_exportacion || x.id_exportacion)}</code></td>
+        <td>${h(act73ExpNombreProp[x.proposito] || x.proposito)}</td>
+        <td>${h(act73ExpFecha(x.fecha_solicitud))}</td>
+        <td>${h(act73ExpTextoEstado(x.estado))}</td>
+        <td>
+          <button type="button" class="lnk" data-act="act73ExpVer"
+            data-id="${h(x.id_exportacion)}">Consultar</button>
+          ${x.estado === 'lista' ? ` · <button type="button" class="lnk"
+            data-act="act73ExpBajar" data-id="${h(x.id_exportacion)}">Descargar ZIP</button>` : ''}
+        </td>
+      </tr>`).join('')}</tbody></table></div>`;
+  }
+
+  function act73ExpEstudios() {
+    const actual = [S.fstudy, S.study, S.ceId]
+      .find(c => STUDIES.some(s => s.id === c)) || '';
+    return '<option value="">Selecciona un estudio</option>' +
+      STUDIES.map(s => `<option value="${h(s.id)}" ${s.id === actual ? 'selected' : ''}>
+        ${h(s.id)} · ${h(s.n)}</option>`).join('');
+  }
+
+  R.d3 = () => shell('d3', `<div class="card">
+    <h2 class="t">Solicitar exportación de datos</h2>
+    <p class="sub">La API genera un ZIP desidentificado con participantes elegibles:
+      código E-, estado del consentimiento y mes de inscripción.</p>
+    <form id="act73-exp-solicitar">
+      <div class="fld">
+        <label for="act73-exp-estudio">Estudio</label>
+        <select id="act73-exp-estudio" required>${act73ExpEstudios()}</select>
+      </div>
+      <div class="fld">
+        <label for="act73-exp-proposito">Propósito</label>
+        <select id="act73-exp-proposito" required>
+          <option value="analisis">Análisis</option>
+          <option value="informe">Informe</option>
+          <option value="publicacion">Publicación</option>
+        </select>
+      </div>
+      <div class="msg info">La versión actual no admite filtros personalizados.
+        No se exportan nombres, RUT, contacto ni archivos originales.</div>
+      <div class="acts">
+        <button type="button" class="btn s" data-go="d6">Mis solicitudes</button>
+        <button type="submit" class="btn p">Solicitar exportación</button>
+      </div>
+    </form></div>`);
+
+  R.d4 = () => {
+    const x = act73ExpUltima && act73ExpConocidas.get(act73ExpUltima);
+    if (!x) {
+      return shell('d4', `<div class="card">
+        <h2 class="t">Sin solicitud reciente</h2>
+        <p class="sub">Crea una solicitud para ver su resultado.</p>
+        <div class="acts">${btn('Solicitar exportación', 'd3')}</div></div>`);
+    }
+    return shell('d4', `<div class="card">
+      <div class="check">✓</div>
+      <h2 class="t">Solicitud registrada en la API</h2>
+      <p class="sub">${x.estado === 'solicitada'
+        ? 'Pendiente de la decisión del Investigador responsable.'
+        : 'Consulta su estado y descarga el paquete cuando esté disponible.'}</p>
+      <div class="big">${h(x.codigo_exportacion)}</div>
+      <div class="tw"><table class="sumtbl" style="min-width:0">
+        <tr><td>Identificador para consultas</td>
+          <td><code style="overflow-wrap:anywhere">${h(x.id_exportacion)}</code></td></tr>
+        <tr><td>Propósito</td><td>${h(act73ExpNombreProp[x.proposito] || x.proposito)}</td></tr>
+        <tr><td>Estado</td><td>${h(act73ExpTextoEstado(x.estado))}</td></tr>
+        <tr><td>Vencimiento</td><td>${h(act73ExpFecha(x.fecha_vencimiento))}</td></tr>
+      </table></div>
+      <div class="hint">Conserva el identificador si otra persona autorizada debe aprobarla:
+        la API todavía no ofrece un listado global de solicitudes.</div>
+      <div class="acts">
+        ${btn('Ver solicitudes', 'd6', 's')}
+        ${x.estado === 'lista' ? `<button type="button" class="btn p"
+          data-act="act73ExpBajar" data-id="${h(x.id_exportacion)}">
+          Descargar ZIP</button>` : ''}
+      </div></div>`);
+  };
+
+  R.d6 = () => shell('d6', `<div class="card wide">
+    <h2 class="t">Exportaciones del estudio</h2>
+    <p class="sub">Se muestran solicitudes creadas o consultadas en esta sesión.
+      El backend no dispone aún de un endpoint para listar todas las exportaciones.</p>
+    ${act73ExpListaHTML()}
+    <div class="fld" style="margin-top:18px">
+      <label for="act73-exp-buscar">Consultar solicitud existente por UUID</label>
+      <input id="act73-exp-buscar" type="text" autocomplete="off"
+        placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+      <div class="hint">El servidor solo permite consultar solicitudes propias o del
+        Investigador responsable, con los permisos correspondientes.</div>
+    </div>
+    <div class="acts">
+      <button type="button" class="btn s" data-act="act73ExpBuscar">Consultar ID</button>
+      ${btn('Nueva solicitud', 'd3')}
+    </div></div>`);
+
+  R.d7 = () => {
+    const x = act73ExpSeleccionada && act73ExpConocidas.get(act73ExpSeleccionada);
+    if (!x) {
+      return shell('d7', `<div class="card"><h2 class="t">Selecciona una solicitud</h2>
+        <div class="acts">${btn('Volver', 'd6', 's')}</div></div>`);
+    }
+    return shell('d7', `<div class="card">
+      <h2 class="t">Revisar solicitud · ${h(x.codigo_exportacion)}</h2>
+      <p class="sub">La aprobación está reservada al Investigador responsable del estudio.</p>
+      <div class="tw"><table class="sumtbl" style="min-width:0">
+        <tr><td>UUID</td><td><code style="overflow-wrap:anywhere">${h(x.id_exportacion)}</code></td></tr>
+        <tr><td>Propósito</td><td>${h(act73ExpNombreProp[x.proposito] || x.proposito)}</td></tr>
+        <tr><td>Estado</td><td>${h(act73ExpTextoEstado(x.estado))}</td></tr>
+        <tr><td>Solicitada el</td><td>${h(act73ExpFecha(x.fecha_solicitud))}</td></tr>
+        <tr><td>Vence</td><td>${h(act73ExpFecha(x.fecha_vencimiento))}</td></tr>
+      </table></div>
+      ${x.estado === 'solicitada' ? `<div class="fld" style="margin-top:16px">
+        <label for="act73-exp-motivo">Motivo de la decisión (mínimo 5 caracteres)</label>
+        <textarea id="act73-exp-motivo" rows="3"
+          placeholder="Explica la aprobación o rechazo, sin datos personales"></textarea>
+      </div>` : ''}
+      <div class="acts">
+        ${btn('Volver', 'd6', 's')}
+        ${x.estado === 'solicitada' && S.role === 'Investigador' ? `
+          <button type="button" class="btn s"
+            data-act="act73ExpDecidir" data-decision="rechazar">Rechazar</button>
+          <button type="button" class="btn p"
+            data-act="act73ExpDecidir" data-decision="aprobar">Aprobar</button>` : ''}
+        ${x.estado === 'lista' ? `<button type="button" class="btn p"
+          data-act="act73ExpBajar" data-id="${h(x.id_exportacion)}">Descargar ZIP</button>` : ''}
+      </div></div>`);
+  };
+
+  async function act73ExpConsultar(id) {
+    if (!act73ExpUuid.test(id)) {
+      throw new Error('Escribe un identificador UUID válido.');
+    }
+    return act73ExpGuardar(
+      await api('GET', '/exportaciones/' + encodeURIComponent(id))
+    );
+  }
+
+  async function act73ExpDescargar(id) {
+    const x = await act73ExpConsultar(id);
+    if (x.estado !== 'lista') {
+      throw new Error('La exportación no está disponible para descarga: ' +
+        act73ExpTextoEstado(x.estado));
+    }
+
+    let respuesta;
+    try {
+      respuesta = await fetch(
+        API + '/exportaciones/' + encodeURIComponent(id) + '/descarga',
+        {
+          method: 'GET',
+          headers: { Authorization: 'Bearer ' + R2.token },
+          cache: 'no-store'
+        }
+      );
+    } catch (_) {
+      throw new Error('No se pudo conectar con la API.');
+    }
+
+    if (!respuesta.ok) {
+      let detalle = {};
+      try { detalle = await respuesta.json(); } catch (_) {}
+      throw new Error(detalle.error?.mensaje ||
+        'La descarga fue rechazada por la API (HTTP ' + respuesta.status + ').');
+    }
+
+    const zip = await respuesta.blob();
+    if (!zip.size) throw new Error('La API devolvió un archivo vacío.');
+
+    const nombre = String(x.codigo_exportacion || 'exportacion')
+      .replace(/[^A-Za-z0-9_-]/g, '') + '.zip';
+
+    const enlace = URL.createObjectURL(zip);
+    try {
+      const a = document.createElement('a');
+      a.href = enlace;
+      a.download = nombre;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(enlace), 30000);
+    }
+    toast('Descarga ZIP iniciada.', 'ok');
+  }
+
+  document.addEventListener('submit', e => {
+    if (e.target?.id !== 'act73-exp-solicitar') return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    if (ocupado || !R2.token || R2.usuario?.debe_cambiar_password) return;
+
+    const codigo = document.getElementById('act73-exp-estudio')?.value || '';
+    const proposito = document.getElementById('act73-exp-proposito')?.value || '';
+    const uuid = uuidDe(codigo);
+
+    if (!uuid) {
+      toast('Selecciona un estudio disponible.', 'err');
+      return;
+    }
+    if (!['analisis', 'informe', 'publicacion'].includes(proposito)) {
+      toast('Selecciona un propósito válido.', 'err');
+      return;
+    }
+
+    conEspera(async () => {
+      try {
+        const x = act73ExpGuardar(
+          await api('POST',
+            '/estudios/' + encodeURIComponent(uuid) + '/exportaciones',
+            { proposito, filtros: {} })
+        );
+        act73ExpUltima = x.id_exportacion;
+        S.fstudy = codigo;
+        goProto('d4');
+        toast('Solicitud creada en la API.', 'ok');
+      } catch (err) {
+        toast(err.mensaje || err.message || 'No se pudo solicitar la exportación.', 'err');
+      }
+    });
+  }, true);
+
+  const act73ExpAcciones = new Set([
+    'act73ExpBuscar', 'act73ExpVer', 'act73ExpDecidir', 'act73ExpBajar'
+  ]);
+
+  document.addEventListener('click', e => {
+    const boton = e.target.closest('[data-act]');
+    if (!boton || !act73ExpAcciones.has(boton.dataset.act)) return;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    if (ocupado || !R2.token || R2.usuario?.debe_cambiar_password) return;
+
+    const accion = boton.dataset.act;
+    const id = accion === 'act73ExpBuscar'
+      ? (document.getElementById('act73-exp-buscar')?.value || '').trim()
+      : accion === 'act73ExpDecidir'
+        ? act73ExpSeleccionada
+        : boton.dataset.id;
+
+    conEspera(async () => {
+      try {
+        if (accion === 'act73ExpBajar') {
+          await act73ExpDescargar(id);
+          return;
+        }
+
+        if (accion === 'act73ExpDecidir') {
+          if (S.role !== 'Investigador') {
+            throw new Error('Solo el Investigador responsable puede decidir.');
+          }
+
+          const motivo =
+            (document.getElementById('act73-exp-motivo')?.value || '').trim();
+          const decision = boton.dataset.decision;
+
+          if (motivo.length < 5) {
+            throw new Error('El motivo debe tener al menos 5 caracteres.');
+          }
+          if (!['aprobar', 'rechazar'].includes(decision)) {
+            throw new Error('Decisión inválida.');
+          }
+
+          act73ExpGuardar(
+            await api('PATCH',
+              '/exportaciones/' + encodeURIComponent(id) + '/aprobacion',
+              { decision, motivo })
+          );
+          toast('Decisión registrada por la API.', 'ok');
+          goProto('d7');
+          return;
+        }
+
+        const x = await act73ExpConsultar(id);
+        act73ExpSeleccionada = x.id_exportacion;
+        goProto('d7');
+      } catch (err) {
+        toast(err.mensaje || err.message || 'Operación no disponible.', 'err');
+      }
+    });
+  }, true);
+
+  const act73ExpGoAnterior = go;
+  go = function(id) {
+    if (id === 'a1') {
+      const salida = act73ExpGoAnterior(id);
+      Promise.resolve(salida).then(() => {
+        if (!R2.token) {
+          act73ExpConocidas.clear();
+          act73ExpUltima = null;
+          act73ExpSeleccionada = null;
+        }
+      });
+      return salida;
+    }
+
+    if (!['d3', 'd4', 'd6', 'd7'].includes(id) ||
+        !R2.token || R2.usuario?.debe_cambiar_password) {
+      return act73ExpGoAnterior(id);
+    }
+    return goProto(id);
+  };
+
+  // ---------- ACT73_CUENTAS_REAL: administración de cuentas mediante API ----------
+  let act73Usuarios = [];
+  const act73Roles = ['Director', 'Soporte', 'Investigador', 'Asistente', 'Estudiante', 'Invitado'];
+  const act73FechaCorta = f => f ? String(f).slice(0, 10) : '—';
+
+  // La contraseña temporal solo se muestra una vez, sin guardarla en storage.
+  const act73ClaveDialogo = document.createElement('div');
+  act73ClaveDialogo.id = 'act73-clave-dialogo';
+  act73ClaveDialogo.setAttribute('role', 'dialog');
+  act73ClaveDialogo.setAttribute('aria-modal', 'true');
+  act73ClaveDialogo.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(11,14,50,.85);z-index:10020;align-items:center;justify-content:center;padding:16px';
+  act73ClaveDialogo.innerHTML = `<div style="background:#fff;border-radius:16px;padding:24px;width:100%;max-width:440px;color:#131315;font-family:Inter,Arial,sans-serif">
+    <h2 style="color:#000B78;margin:0 0 10px">Contraseña temporal</h2>
+    <p id="act73-clave-cuenta" style="overflow-wrap:anywhere"></p>
+    <p style="font-size:13px">Cópiala y entrégala mediante un canal seguro. No volverá a mostrarse al cerrar esta ventana.</p>
+    <div id="act73-clave-valor" style="font-size:20px;font-weight:700;letter-spacing:.04em;padding:12px;background:#f2f3fa;border-radius:8px;user-select:all;overflow-wrap:anywhere"></div>
+    <button type="button" id="act73-clave-cerrar" class="btn p" style="margin-top:18px">Ya la guardé; cerrar</button>
+  </div>`;
+
+  document.body.appendChild(act73ClaveDialogo);
+
+  function act73OcultarClave() {
+    act73ClaveDialogo.querySelector('#act73-clave-valor').textContent = '';
+    act73ClaveDialogo.querySelector('#act73-clave-cuenta').textContent = '';
+    act73ClaveDialogo.style.display = 'none';
+  }
+
+  function act73MostrarClave(correo, clave) {
+    act73ClaveDialogo.querySelector('#act73-clave-cuenta').textContent = 'Cuenta: ' + correo;
+    act73ClaveDialogo.querySelector('#act73-clave-valor').textContent = clave;
+    act73ClaveDialogo.style.display = 'flex';
+    act73ClaveDialogo.querySelector('#act73-clave-cerrar').focus();
+  }
+
+  act73ClaveDialogo.querySelector('#act73-clave-cerrar')
+    .addEventListener('click', act73OcultarClave);
+
+  const act73AdminPermitido = () =>
+    R2.token && !R2.usuario?.debe_cambiar_password &&
+    ['Director', 'Soporte'].includes(S.role);
+
+  const act73PantallaCuentas = () => S.role === 'Soporte' ? 'e3' : 'e1';
+
+  async function act73CargarUsuarios() {
+    act73Usuarios = lista(await api('GET', '/usuarios'));
+  }
+
+  function act73FilaUsuario(u) {
+    const puedeGestionar = S.role === 'Director' || u.nombre_rol !== 'Director';
+    const esPropio = u.correo?.toLowerCase() === R2.usuario?.correo?.toLowerCase();
+    const esDirector = S.role === 'Director';
+
+    const opcionesRol = act73Roles
+      .filter(r => esDirector || r !== 'Director')
+      .map(r => `<option value="${h(r)}" ${r === u.nombre_rol ? 'selected' : ''}>${h(r)}</option>`)
+      .join('');
+
+    return `<tr>
+      <td><b>${h(u.nombre)}</b><div class="hint">${h(u.correo)}</div><div class="hint">UUID: <code>${h(u.id_usuario)}</code></div></td>
+      <td>${puedeGestionar && !esPropio
+        ? `<select data-act73-rol="1" aria-label="Rol de ${h(u.correo)}">${opcionesRol}</select>
+           <button type="button" class="lnk" data-act="act73UserRol"
+             data-id="${h(u.id_usuario)}">Guardar rol</button>`
+        : h(u.nombre_rol)}</td>
+      <td>${u.activo
+        ? '<span class="pill ok">Activa</span>'
+        : '<span class="pill err">Bloqueada</span>'}</td>
+      <td>${u.mfa_activo ? 'Configurado' : 'Pendiente'}</td>
+      <td>${h(act73FechaCorta(u.fecha_expiracion))}</td>
+      <td>${puedeGestionar && !esPropio ? `
+        <button type="button" class="lnk" data-act="act73UserBloqueo"
+          data-id="${h(u.id_usuario)}"
+          data-activo="${u.activo ? 'false' : 'true'}">
+          ${u.activo ? 'Bloquear' : 'Activar'}
+        </button> ·
+        <button type="button" class="lnk" data-act="act73UserClave"
+          data-id="${h(u.id_usuario)}">Restablecer clave</button> ·
+        <button type="button" class="lnk" data-act="act73UserMfa"
+          data-id="${h(u.id_usuario)}">Reiniciar MFA</button>
+        ` : 'Sin permisos'}
+      </td>
+    </tr>`;
+  }
+
+  function act73RenderUsuarios(pantalla) {
+    const titulo = pantalla === 'e3' ? 'Cuentas de usuario' : 'Usuarios y roles';
+
+    return shell(pantalla, `<div class="card wide">
+      <div class="top" style="margin:0 0 14px">
+        <div>
+          <h2 class="t">${titulo}</h2>
+          <p class="sub" style="margin:0">
+            Cuentas obtenidas de la API real. Los cambios se auditan en el servidor.
+          </p>
+        </div>
+        ${btn('+ Nueva cuenta', 'e2')}
+      </div>
+
+      <div class="tw"><table>
+        <thead><tr>
+          <th>Nombre / correo</th><th>Rol</th><th>Estado</th>
+          <th>MFA</th><th>Vence</th><th>Acciones</th>
+        </tr></thead>
+        <tbody>${act73Usuarios.map(act73FilaUsuario).join('') ||
+          '<tr><td colspan="6">No hay cuentas disponibles.</td></tr>'}</tbody>
+      </table></div>
+
+      <div class="hint" style="margin-top:12px">
+        Solo Director puede administrar cuentas de Director.
+        Restablecer una contraseña o reiniciar MFA puede cerrar sesiones activas.
+      </div>
+    </div>`);
+  }
+
+  R.e1 = () => act73RenderUsuarios('e1');
+  R.e3 = () => act73RenderUsuarios('e3');
+
+  R.e2 = () => shell('e2', `<div class="card">
+    <h2 class="t">Crear cuenta</h2>
+    <p class="sub">
+      La API entrega una contraseña temporal que se muestra una sola vez.
+    </p>
+
+    <form id="act73-user-form">
+      <div class="fld">
+        <label for="act73-user-nombre">Nombre</label>
+        <input id="act73-user-nombre" required maxlength="150" autocomplete="off">
+      </div>
+      <div class="fld">
+        <label for="act73-user-correo">Correo</label>
+        <input id="act73-user-correo" type="email" required autocomplete="off">
+      </div>
+      <div class="fld">
+        <label for="act73-user-rol">Rol</label>
+        <select id="act73-user-rol">
+          ${act73Roles
+            .filter(r => S.role === 'Director' || r !== 'Director')
+            .map(r => `<option value="${h(r)}">${h(r)}</option>`)
+            .join('')}
+        </select>
+      </div>
+      <div class="fld">
+        <label for="act73-user-fin">
+          Fecha de término (requerida para roles temporales)
+        </label>
+        <input id="act73-user-fin" type="date">
+        <div class="hint">
+          El servidor valida qué roles necesitan fecha de expiración.
+        </div>
+      </div>
+      <div class="acts">
+        <button class="btn s" type="button"
+          data-go="${act73PantallaCuentas()}">Cancelar</button>
+        <button type="submit" class="btn p">Crear cuenta</button>
+      </div>
+    </form>
+  </div>`);
+
+  document.addEventListener('submit', e => {
+    if (e.target?.id !== 'act73-user-form') return;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    if (ocupado || !act73AdminPermitido()) return;
+
+    const nombre = (document.getElementById('act73-user-nombre')?.value || '').trim();
+    const correo = (document.getElementById('act73-user-correo')?.value || '')
+      .trim().toLowerCase();
+    const rol = document.getElementById('act73-user-rol')?.value || '';
+    const fecha = document.getElementById('act73-user-fin')?.value || '';
+
+    if (!nombre || !correo || !act73Roles.includes(rol)) {
+      return toast('Completa los campos obligatorios.', 'err');
+    }
+
+    conEspera(async () => {
+      try {
+        const creado = await api('POST', '/usuarios', {
+          nombre,
+          correo,
+          rol,
+          ...(fecha ? { fecha_expiracion: fecha } : {})
+        });
+
+        try {
+          await act73CargarUsuarios();
+          goProto(act73PantallaCuentas());
+        } catch (_) {
+          toast('Cuenta creada; no se pudo actualizar el listado.', 'err');
+        }
+
+        if (creado.password_temporal) {
+          act73MostrarClave(creado.correo || correo, creado.password_temporal);
+        } else {
+          toast('Cuenta creada sin contraseña temporal en la respuesta.', 'err');
+        }
+      } catch (err) {
+        toast(err.mensaje || err.message || 'No se pudo crear la cuenta.', 'err');
+      }
+    });
+  }, true);
+
+  const act73AccionesUsuario = new Set([
+    'act73UserBloqueo',
+    'act73UserClave',
+    'act73UserMfa',
+    'act73UserRol'
+  ]);
+
+  document.addEventListener('click', e => {
+    const boton = e.target.closest('[data-act]');
+    if (!boton || !act73AccionesUsuario.has(boton.dataset.act)) return;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    if (ocupado || !act73AdminPermitido()) return;
+
+    const user = act73Usuarios.find(u => u.id_usuario === boton.dataset.id);
+
+    if (!user) {
+      return toast('La cuenta ya no está disponible. Actualiza el listado.', 'err');
+    }
+
+    if (S.role !== 'Director' && user.nombre_rol === 'Director') {
+      return toast('No tienes permiso para administrar Director.', 'err');
+    }
+
+    const accion = boton.dataset.act;
+    const cuerpo =
+      accion === 'act73UserBloqueo' ? { activo: boton.dataset.activo === 'true' } :
+      accion === 'act73UserClave' ? { restablecer_password: true } :
+      accion === 'act73UserMfa' ? { reiniciar_mfa: true } :
+      { rol: boton.closest('tr')?.querySelector('select[data-act73-rol]')?.value };
+
+    if (
+      accion === 'act73UserRol' &&
+      (!act73Roles.includes(cuerpo.rol) || cuerpo.rol === user.nombre_rol)
+    ) {
+      return toast('Selecciona un rol diferente.', 'err');
+    }
+
+    const textoAccion =
+      accion === 'act73UserBloqueo' ? (cuerpo.activo ? 'activar' : 'bloquear') :
+      accion === 'act73UserClave' ? 'restablecer la contraseña de' :
+      accion === 'act73UserMfa' ? 'reiniciar el MFA de' :
+      'cambiar el rol de';
+
+    if (!confirm(`¿Confirmas ${textoAccion} ${user.correo}?`)) return;
+
+    conEspera(async () => {
+      try {
+        const actualizado = await api(
+          'PATCH',
+          '/usuarios/' + encodeURIComponent(user.id_usuario),
+          cuerpo
+        );
+
+        try {
+          await act73CargarUsuarios();
+          goProto(act73PantallaCuentas());
+        } catch (_) {
+          toast('Cambio aplicado; no se pudo actualizar el listado.', 'err');
+        }
+
+        if (actualizado.password_temporal) {
+          act73MostrarClave(user.correo, actualizado.password_temporal);
+        } else {
+          toast('Cambio aplicado en la API.', 'ok');
+        }
+      } catch (err) {
+        toast(err.mensaje || err.message || 'No se pudo actualizar la cuenta.', 'err');
+      }
+    });
+  }, true);
+
+  const act73CuentasGoAnterior = go;
+
+  go = function(id) {
+    if (id === 'a1') {
+      const salida = act73CuentasGoAnterior(id);
+
+      Promise.resolve(salida).then(() => {
+        if (!R2.token) {
+          act73Usuarios = [];
+          act73OcultarClave();
+        }
+      });
+
+      return salida;
+    }
+
+    if (!['e1', 'e2', 'e3'].includes(id)) {
+      return act73CuentasGoAnterior(id);
+    }
+
+    if (!act73AdminPermitido()) {
+      toast('Solo Director y Soporte pueden administrar cuentas.', 'err');
+      return;
+    }
+
+    if (id === 'e2') return goProto('e2');
+
+    return conEspera(async () => {
+      try {
+        await act73CargarUsuarios();
+        goProto(id);
+      } catch (err) {
+        toast(
+          err.mensaje || err.message || 'No se pudieron consultar las cuentas.',
+          'err'
+        );
+      }
+    });
+  };
+
+  // ---------- ACT73_ASIGNAR_ESTUDIO_REAL: asignación mínima de usuarios ----------
+  const act73AsigUuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  let act73AsigEstudio = null;
+  let act73AsigMiembros = [];
+
+  async function act73AsigConsultar(codigo) {
+    const id = uuidDe(codigo);
+    if (!id) throw new Error('Selecciona un estudio válido.');
+    const respuesta = await api(
+      'GET', '/estudios/' + encodeURIComponent(id) + '/membresias'
+    );
+    act73AsigMiembros = lista(respuesta);
+    act73AsigEstudio = codigo;
+  }
+
+  R.c4 = () => {
+    const codigo = act73AsigEstudio || S.ceId;
+    const estudio = STUDIES.find(s => s.id === codigo);
+
+    return shell('c1', `<div class="card wide">
+      <h2 class="t">Asignar usuario a un estudio</h2>
+      <p class="sub">Consulta las membresías reales y asigna una cuenta existente.
+        El servidor verifica los permisos del Investigador.</p>
+
+      <div class="fld" style="max-width:580px">
+        <label for="act73-asig-estudio">Estudio</label>
+        <select id="act73-asig-estudio">
+          ${STUDIES.map(s =>
+            `<option value="${h(s.id)}" ${s.id === codigo ? 'selected' : ''}>
+              ${h(s.id)} · ${h(s.n)}
+            </option>`
+          ).join('')}
+        </select>
+      </div>
+
+      ${estudio ? `<div class="msg info">
+        Estudio: <b>${h(estudio.id)} · ${h(estudio.n)}</b>
+      </div>` : ''}
+
+      <h3 style="font-size:16px;margin:18px 0 8px">Integrantes actuales</h3>
+      <div class="tw"><table>
+        <tr><th>Nombre</th><th>Rol</th><th>Consultar</th><th>Vence</th></tr>
+        ${act73AsigMiembros.map(m => `<tr>
+          <td>${h(m.nombre)}<div class="hint">${h(m.correo)}</div></td>
+          <td>${h(m.nombre_rol)}</td>
+          <td>${m.puede_consultar ? 'Sí' : 'No'}</td>
+          <td>${h(m.fecha_fin ? String(m.fecha_fin).slice(0, 10) : '—')}</td>
+        </tr>`).join('') ||
+        '<tr><td colspan="4">No hay membresías vigentes visibles.</td></tr>'}
+      </table></div>
+
+      <h3 style="font-size:16px;margin:20px 0 8px">Nueva asignación</h3>
+
+      <form id="act73-asig-form">
+        <div class="fld">
+          <label for="act73-asig-usuario">UUID del usuario</label>
+          <input id="act73-asig-usuario" required maxlength="36"
+            autocomplete="off"
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+          <div class="hint">
+            El UUID se consulta desde Equipo y roles con una cuenta de Director.
+          </div>
+        </div>
+
+        <div class="fld">
+          <label for="act73-asig-fin">Acceso hasta (opcional)</label>
+          <input id="act73-asig-fin" type="date">
+        </div>
+
+        <div class="msg info">
+          La asignación otorgará solo el permiso <b>Consultar</b>.
+          Los demás permisos permanecerán desactivados.
+        </div>
+
+        <div class="acts">
+          ${btn('Volver', 'c3', 's')}
+          <button type="submit" class="btn p">
+            Asignar a este estudio
+          </button>
+        </div>
+      </form>
+    </div>`);
+  };
+
+  document.addEventListener('change', e => {
+    if (e.target?.id !== 'act73-asig-estudio' ||
+        ocupado || S.role !== 'Investigador') return;
+
+    const codigo = e.target.value;
+
+    conEspera(async () => {
+      try {
+        await act73AsigConsultar(codigo);
+        S.ceId = codigo;
+        goProto('c4');
+      } catch (err) {
+        toast(err.mensaje || err.message ||
+          'No fue posible cargar las membresías.', 'err');
+      }
+    });
+  });
+
+  document.addEventListener('submit', e => {
+    if (e.target?.id !== 'act73-asig-form') return;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    if (ocupado || !R2.token || S.role !== 'Investigador' ||
+        R2.usuario?.debe_cambiar_password) return;
+
+    const usuario =
+      (document.getElementById('act73-asig-usuario')?.value || '').trim();
+    const fin =
+      document.getElementById('act73-asig-fin')?.value || '';
+
+    if (!act73AsigUuidRe.test(usuario)) {
+      return toast('Introduce un UUID válido.', 'err');
+    }
+
+    const idEstudio = uuidDe(act73AsigEstudio);
+
+    if (!idEstudio) {
+      return toast('Estudio no disponible.', 'err');
+    }
+
+    if (!confirm('¿Asignar este usuario al estudio con permiso de consulta?')) {
+      return;
+    }
+
+    conEspera(async () => {
+      try {
+        await api(
+          'POST',
+          '/estudios/' + encodeURIComponent(idEstudio) + '/membresias',
+          {
+            id_usuario: usuario,
+            puede_consultar: true,
+            ...(fin ? { fecha_fin: fin } : {})
+          }
+        );
+
+        await act73AsigConsultar(act73AsigEstudio);
+        goProto('c4');
+        toast('Usuario asignado al estudio correctamente.', 'ok');
+      } catch (err) {
+        toast(err.mensaje || err.message ||
+          'No se pudo asignar el usuario.', 'err');
+      }
+    });
+  }, true);
+
+  const act73AsigGoAnterior = go;
+
+  go = function(id) {
+    if (id === 'a1') {
+      const salida = act73AsigGoAnterior(id);
+
+      Promise.resolve(salida).then(() => {
+        if (!R2.token) {
+          act73AsigEstudio = null;
+          act73AsigMiembros = [];
+        }
+      });
+
+      return salida;
+    }
+
+    if (id !== 'c4') return act73AsigGoAnterior(id);
+
+    if (S.role !== 'Investigador' || !R2.token ||
+        R2.usuario?.debe_cambiar_password) {
+      toast('Solo el Investigador autorizado puede asignar usuarios.', 'err');
+      return;
+    }
+
+    return conEspera(async () => {
+      try {
+        await act73AsigConsultar(S.ceId || STUDIES[0]?.id);
+        goProto('c4');
+      } catch (err) {
+        toast(err.mensaje || err.message ||
+          'No se pudo consultar el equipo.', 'err');
+      }
+    });
+  };
 
   // Arranque: siempre desde el ingreso
   S.err = false; goProto('a1');
