@@ -1,3 +1,4 @@
+
 /* plaGesEtic · Capa que conecta el prototipo navegable v2.3.1 con la API real (SOLO DEMO / DESARROLLO).
  * No cambia el diseño: reemplaza los datos de ejemplo por los de la API en estas pantallas:
  *   A1/A2  ingreso con contraseña + código (o código de recuperación)  → POST /auth/login, /auth/login/mfa
@@ -7,7 +8,9 @@
  *   B0-B5  alta de participante: busca, y al guardar la decisión del consentimiento registra la identidad cifrada
  *          e inscribe → POST /identidades(/buscar), /estudios/{id}/participaciones
  *   Cerrar sesión                                                      → POST /auth/logout
- * El resto de las pantallas sigue siendo el prototipo (aún no tiene API).
+ *   Cambio obligatorio de contraseña                                  → POST /auth/password
+ * Las pantallas de exportación, administración y archivos siguen pendientes de integración.
+ * La experiencia continúa siendo una demo de desarrollo.
  */
 (function () {
   'use strict';
@@ -45,12 +48,14 @@
   .rl-qrlink{display:inline-block;margin:2px 0 8px;border:0;background:none;color:#1C2FB9;font:600 13px Inter,Arial,sans-serif;text-decoration:underline;cursor:pointer;padding:0}
   .rl-ver:hover{background:#DDE2FF}.rl-ver:focus-visible{outline:2px solid #253FF6;outline-offset:2px}`;
   document.head.appendChild(css);
+
   const badge = document.createElement('div'); badge.id = 'rl-badge'; badge.innerHTML = '<i></i>Conectado a la API real';
   const cel = document.createElement('div'); cel.id = 'rl-cel';
   cel.innerHTML = '<small>Celular simulado · app de autenticación</small><div class="c" title="Clic para copiarlo al campo">------</div><div class="b"><div></div></div><small style="margin-top:6px" id="rl-cel-u"></small>';
   const toastEl = document.createElement('div'); toastEl.id = 'rl-toast';
   const qrEl = document.createElement('div'); qrEl.id = 'rl-qr'; qrEl.setAttribute('role', 'dialog'); qrEl.setAttribute('aria-modal', 'true');
   document.body.append(badge, cel, toastEl, qrEl);
+
   async function mostrarQR() {
     if (!R2.correo) return;
     let uri = '';
@@ -65,6 +70,7 @@
       <div class="row"><button type="button" data-act="qrX">Listo</button></div></div>`;
     qrEl.style.display = 'flex';
   }
+
   qrEl.addEventListener('click', (e) => { if (e.target === qrEl || e.target.closest('[data-act="qrX"]')) qrEl.style.display = 'none'; });
   let tt;
   function toast(msg, tipo) { toastEl.textContent = msg; toastEl.className = tipo || ''; toastEl.style.display = 'block'; clearTimeout(tt); tt = setTimeout(() => (toastEl.style.display = 'none'), 4200); }
@@ -80,6 +86,7 @@
     if (!r.ok) throw Object.assign({ status: r.status }, j.error || { codigo: 'ERROR', mensaje: 'Error ' + r.status });
     return j;
   }
+
   // FormData: el navegador asigna el boundary; no enviar Content-Type manualmente.
   async function apiArchivo(ruta, datos) {
     let respuesta, cuerpo = {};
@@ -103,6 +110,7 @@
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const lista = (respuesta) => Array.isArray(respuesta) ? respuesta : (respuesta.datos || []);
   const VERSION_FALTA = 'Este estudio no tiene un documento de consentimiento vigente. Solicita que lo carguen antes de continuar.';
+
   async function documentosVigentes() {
     const estudio = uuidDe(S.study);
     if (!estudio) throw new Error('Selecciona un estudio activo antes de registrar la decisión.');
@@ -111,6 +119,7 @@
     if (!vigente || !vigente.version) throw new Error(VERSION_FALTA);
     R2.documentos = { consentimiento: vigente };
   }
+
   // API del consentimiento: se usa un servicio reutilizable y comprobable por separado.
   const act58 = window.PlaGesActividad58;
   if (!act58) throw new Error('No se cargó actividad58-eventos.js');
@@ -129,11 +138,13 @@
       if (j.codigo) { cel.querySelector('.c').textContent = j.codigo.slice(0, 3) + ' ' + j.codigo.slice(3); cel.querySelector('.b>div').style.width = (j.segundos_restantes / 30 * 100) + '%'; document.getElementById('rl-cel-u').textContent = R2.correo; }
     } catch (e) { /* ignora */ }
   }, 1000);
+
   cel.querySelector('.c').onclick = () => { const o = document.getElementById('otp'); if (o) o.value = cel.querySelector('.c').textContent.replace(/\s/g, ''); };
 
   // ---------- datos reales → estructuras del prototipo ----------
   const FECHA = (d) => (d ? String(d).slice(0, 10).split('-').reverse().join('/') : '—');
   const ESTADO = { activo: 'Activo', borrador: 'Borrador', cerrado: 'Cerrado' };
+
   async function cargarEstudios() {
     const lista = await api('GET', '/estudios');
     R2.estudios = Array.isArray(lista) ? lista : (lista.datos || []);
@@ -150,7 +161,9 @@
     for (const s of nuevos) { try { await cargarParticipantes(s.id, true); } catch (x) { /* sin permiso */ } }
     if (STUDIES[0]) S.ceId = STUDIES[0].id;
   }
+
   const uuidDe = (codigo) => (STUDIES.find((s) => s.id === codigo) || {})._uuid;
+
   async function cargarParticipantes(codigo, acumular) {
     const id = uuidDe(codigo); if (!id) return;
     const ps = await api('GET', '/estudios/' + id + '/participaciones');
@@ -165,6 +178,7 @@
         p.estado === 'activo' ? 'ok' : 'err', FECHA(p.fecha_inicio), p.es_menor_al_enrolar ? 'Sí' : 'No']);
     });
   }
+
   function aplicarUsuario(u) {
     R2.usuario = u;
     const rol = ROLES.includes(u.rol) ? u.rol : 'Investigador';
@@ -180,20 +194,25 @@
     .replace(/<label class="chk">[\s\S]*?<\/label>/, '')
     .replace('<button class="lnk" data-act="err">Simular contraseña incorrecta</button>', '<span class="hint">Usuarios de prueba: test_[rol]@uxlab.test · clave Plagesetic.2026</span>')
     .replace('Usuario o contraseña incorrectos.', S.errMsg || 'Usuario o contraseña incorrectos.');
+
   const a2V = R.a2;
   R.a2 = () => a2V().replace('<button class="lnk" data-go="a2r">', (S.otpErr ? `<div class="msg err" role="alert">${S.otpErr}</div>` : '') + '<button type="button" class="rl-qrlink" data-act="verqr">¿Primera vez? Configura tu celular con un código QR</button><br><button class="lnk" data-go="a2r">');
+
   const a2rV = R.a2r;
   R.a2r = () => a2rV().replace('<button class="lnk" data-go="a2">', (S.otpErr ? `<div class="msg err" role="alert">${S.otpErr}</div>` : '') + '<button class="lnk" data-go="a2">');
+
   // Mis estudios: cada fila abre SU estudio (el prototipo esperaba códigos UX-2026-0X)
   const c1V = R.c1;
   R.c1 = () => c1V().replace(/<tr><td><code>([^<]+)<\/code><\/td>([\s\S]*?)<\/tr>/g, (m, id, resto) =>
     `<tr><td><code>${id}</code></td>` + resto
       .replace('<button class="lnk" data-go="c3">Ver</button>', `<button class="lnk" data-act="stuVer" data-id="${id}">Ver participantes</button>`)
       .replace('<button class="lnk" data-go="c2">Editar</button>', `<button class="lnk" data-act="stuEdit" data-id="${id}">Editar</button>`) + '</tr>');
-        // Buscador de estudios (C1): filtra las filas por código o nombre, sin llamar a la API
+
+  // Buscador de estudios (C1): filtra las filas por código o nombre, sin llamar a la API
   const c1Base = R.c1;
   R.c1 = () => c1Base().replace('<div class="tw">',
     '<div class="fld"><input id="buscaEst" type="search" placeholder="Buscar por código o nombre"></div><div class="tw">');
+
   document.addEventListener('input', (e) => {
     if (e.target.id !== 'buscaEst') return;
     const texto = e.target.value.trim().toLowerCase();
@@ -202,13 +221,16 @@
       fila.style.display = fila.textContent.toLowerCase().includes(texto) ? '' : 'none';
     });
   });
-      // Textos de «prototipo» → datos reales
+
+  // Textos de «prototipo» → datos reales
   const shellV = shell;
   shell = function (mc, inner) { return shellV(mc, inner).replace('· nombre ficticio', '· usuario de prueba'); };
   const a3V = R.a3;
   R.a3 = () => a3V().replace(/· PROTOTIPO/gi, '· plaGesEtic');
-    const c2V = R.c2;
+
+  const c2V = R.c2;
   R.c2 = () => c2V().replace(btn('Guardar', 'c1', 's'), '<button class="btn s" data-act="estGuardar">Guardar</button>');
+
   const c3V = R.c3;
   R.c3 = () => {
     const s = STUDIES.find((x) => x.id === S.ceId) || STUDIES[0] || { id: '—', n: '' };
@@ -368,11 +390,13 @@
   const fichaActual = () => R2.ficha && R2.ficha.codigo === S.ficha ? R2.ficha : null;
   const idParticipacionActual = () => R2.participaciones.get(S.ficha);
   const avisoD21 = '<div class="msg warn"><b>Privacidad D21:</b> no escribas nombres, RUT, correos ni otros datos identificatorios en el motivo, la observación o la justificación.</div>';
+
   function borrarSensibles() {
     // Los datos solo viven durante la pantalla que los muestra, nunca en storage/logs.
     R2.sensible = null;
     R2.contactoMotivo = null;
   }
+
   async function idConsentimientoActual() {
     const id = idParticipacionActual();
     if (!id) throw new Error('No se encontró la participación. Vuelve a cargar sus participantes.');
@@ -387,6 +411,7 @@
     R2.idsConsentimiento.set(id, r.id_consentimiento);
     return r.id_consentimiento;
   }
+
   async function abrirEvento(tipo) {
     if (!fichaActual()) await cargarFicha(S.ficha);
     if (!tipoActual()) throw new Error('No existe un consentimiento registrado para esta participación.');
@@ -407,6 +432,7 @@
     }
     goProto('act58evento');
   }
+
   R.act58evento = () => {
     const retiro = R2.eventoTipo === 'retirar';
     const actual = tipoActual() || {};
@@ -423,6 +449,7 @@
       <div class="acts">${btn('Cancelar','c6','s')}
         <button type="button" class="btn p" data-act="act58GuardarEvento">${retiro?'Confirmar retiro':'Guardar reconsentimiento'}</button></div></div>`);
   };
+
   async function guardarEvento() {
     if (!R2.eventoTipo) throw new Error('Selecciona un evento.');
     const tipo = R2.eventoTipo;
@@ -446,6 +473,7 @@
     toast(tipo === 'retirar' ? 'Retiro registrado en la API.' : 'Reconsentimiento registrado en la API.', 'ok');
     goProto('c6');
   }
+
   R.act58contact = () => shell('c1', `<div class="card"><h2 class="t">Datos de contacto · ${h(S.ficha || '—')}</h2>
     <p class="sub">Acceso excepcional para el Investigador responsable o el Director. La consulta queda auditada.</p>
     ${avisoD21}
@@ -456,6 +484,7 @@
     <div class="fld"><label for="act58Detalle">Detalle para «Otro»</label>
     <textarea id="act58Detalle" rows="3" placeholder="Explica el propósito sin datos identificatorios"></textarea></div>
     <div class="acts">${btn('Cancelar','c6','s')}<button class="btn p" data-act="act58ConsultarContacto">Consultar contacto</button></div></div>`);
+
   async function consultarContacto() {
     const id = idParticipacionActual();
     if (!id) throw new Error('No se encontró la participación.');
@@ -466,6 +495,7 @@
     R2.contactoMotivo = motivo;
     goProto('act58resultado');
   }
+
   R.act58identity = () => {
     const codigoEstudio = R2.estudioParticipacion.get(S.ficha) || S.ceId;
     const estudios = STUDIES.map(s => `<option value="${h(s.id)}" ${s.id === codigoEstudio ? 'selected' : ''}>${h(s.id)} · ${h(s.n)}</option>`).join('');
@@ -480,6 +510,7 @@
     <div class="acts">${btn('Cancelar', fichaActual() ? 'c6' : 'a3','s')}
       <button class="btn p" data-act="act58Desenmascarar">Solicitar desenmascaramiento</button></div></div>`);
   };
+
   async function consultarIdentidad() {
     const ux = val('act58UXL').toUpperCase();
     const uuid = uuidDe(val('act58Estudio'));
@@ -491,6 +522,7 @@
     R2.sensible = { clase: 'identidad', datos: act58.soloIdentidad(resultado) };
     goProto('act58resultado');
   }
+
   R.act58resultado = () => {
     const datos = R2.sensible;
     if (!datos) return shell('c1', `<div class="card"><h2 class="t">Datos no disponibles</h2>
@@ -504,6 +536,7 @@
       ${campos.map(([key, titulo]) => `<tr><td>${titulo}</td><td>${h(datos.datos[key] ?? '—')}</td></tr>`).join('')}</table></div>
       <div class="acts"><button type="button" class="btn p" data-act="act58CerrarSensibles">Cerrar y borrar datos</button></div></div>`);
   };
+
   // Captura de los botones heredados del prototipo ANTES de que puedan activar sus simulaciones.
   // No se emiten datos personales a consola, storage ni a otros componentes.
   const accionAct58 = async (accion) => {
@@ -518,6 +551,7 @@
       else if (accion === 'act58CerrarSensibles') { borrarSensibles(); go('a3'); }
     } catch (e) { toast(act58.mensajeError(e), 'err'); }
   };
+
   const accionesAct58 = new Set(['act58RetiroForm','act58ReconsForm','act58ContactForm','contacto',
     'act58IdentityForm','act58GuardarEvento','act58ConsultarContacto','contactOk','act58Desenmascarar',
     'act58CerrarSensibles','retirar']);
@@ -547,7 +581,100 @@
   }
   const val = (id) => ((document.getElementById(id) || {}).value || '').trim();
 
+  // ---------- Actividad 73: cambio obligatorio de contrasena ----------
+  // Este formulario se abre solamente despues de verificar el MFA.
+  // No guarda contrasenas en localStorage, sessionStorage ni en la consola.
+  const cambioClave = document.createElement('div');
+  cambioClave.id = 'rl-cambio-clave';
+  cambioClave.setAttribute('role', 'dialog');
+  cambioClave.setAttribute('aria-modal', 'true');
+  cambioClave.setAttribute('aria-labelledby', 'rl-cambio-titulo');
+  cambioClave.style.cssText = 'display:none;position:fixed;inset:0;z-index:10010;background:rgba(11,14,50,.88);align-items:center;justify-content:center;padding:16px';
+  cambioClave.innerHTML = `
+    <form id="rl-form-cambio" style="background:#fff;color:#131315;width:100%;max-width:440px;padding:26px;border-radius:16px;font-family:Inter,Arial,sans-serif;box-shadow:0 20px 50px rgba(0,0,0,.3)">
+      <h2 id="rl-cambio-titulo" style="color:#000B78;margin:0 0 10px;font-size:21px">Cambio obligatorio de contraseña</h2>
+      <p style="font-size:14px;line-height:1.5;margin:0 0 14px">Por seguridad, debes reemplazar tu contraseña temporal antes de usar el sistema.</p>
+      <label for="rl-clave-actual" style="display:block;margin-top:14px;font-size:14px">Contraseña temporal</label>
+      <input id="rl-clave-actual" type="password" autocomplete="current-password" required
+        style="width:100%;box-sizing:border-box;padding:10px;margin-top:5px">
+      <label for="rl-clave-nueva" style="display:block;margin-top:14px;font-size:14px">Nueva contraseña (mínimo 12 caracteres)</label>
+      <input id="rl-clave-nueva" type="password" autocomplete="new-password" minlength="12" required
+        style="width:100%;box-sizing:border-box;padding:10px;margin-top:5px">
+      <label for="rl-clave-confirmar" style="display:block;margin-top:14px;font-size:14px">Confirmar nueva contraseña</label>
+      <input id="rl-clave-confirmar" type="password" autocomplete="new-password" minlength="12" required
+        style="width:100%;box-sizing:border-box;padding:10px;margin-top:5px">
+      <p id="rl-cambio-error" role="alert" aria-live="polite" style="color:#B42318;font-size:13px;min-height:18px"></p>
+      <button id="rl-cambio-guardar" type="submit"
+        style="width:100%;background:#000B78;color:#fff;border:0;border-radius:9px;padding:12px;cursor:pointer">Actualizar contraseña</button>
+      <button id="rl-cambio-salir" type="button"
+        style="width:100%;margin-top:10px;background:#eee;color:#131315;border:0;border-radius:9px;padding:10px;cursor:pointer">Cerrar sesión</button>
+    </form>`;
+  document.body.appendChild(cambioClave);
+
+  function abrirCambioClave() {
+    cambioClave.style.display = 'flex';
+    document.getElementById('rl-cambio-error').textContent = '';
+    document.getElementById('rl-clave-actual').focus();
+  }
+
+  function ocultarCambioClave() {
+    cambioClave.querySelector('#rl-form-cambio').reset();
+    cambioClave.style.display = 'none';
+  }
+
+  cambioClave.querySelector('#rl-form-cambio').addEventListener('submit', async (evento) => {
+    evento.preventDefault();
+    if (!R2.token || !R2.usuario?.debe_cambiar_password) return;
+
+    const actual = document.getElementById('rl-clave-actual').value;
+    const nueva = document.getElementById('rl-clave-nueva').value;
+    const confirmar = document.getElementById('rl-clave-confirmar').value;
+    const error = document.getElementById('rl-cambio-error');
+    const boton = document.getElementById('rl-cambio-guardar');
+    error.textContent = '';
+
+    if (nueva.length < 12) {
+      error.textContent = 'La nueva contraseña debe tener al menos 12 caracteres.';
+      return;
+    }
+    if (nueva === actual) {
+      error.textContent = 'La nueva contraseña debe ser distinta de la temporal.';
+      return;
+    }
+    if (nueva !== confirmar) {
+      error.textContent = 'Las contraseñas nuevas no coinciden.';
+      return;
+    }
+
+    boton.disabled = true;
+    try {
+      await api('POST', '/auth/password', { password_actual: actual, password_nueva: nueva });
+      R2.usuario.debe_cambiar_password = false;
+      ocultarCambioClave();
+      try { await cargarEstudios(); } catch (_) { /* El panel se muestra igualmente. */ }
+      goProto('a3');
+      toast('Contraseña actualizada correctamente.', 'ok');
+    } catch (err) {
+      error.textContent = err.mensaje || 'No se pudo actualizar la contraseña.';
+    } finally {
+      boton.disabled = false;
+    }
+  });
+
+  cambioClave.querySelector('#rl-cambio-salir').addEventListener('click', async () => {
+    await go('a1');
+    if (!R2.token) ocultarCambioClave();
+    else document.getElementById('rl-cambio-error').textContent =
+      'No se pudo cerrar la sesión. Inténtalo nuevamente.';
+  });
+
   go = function (id) {
+    // Mientras se deba cambiar la contrasena, no se puede acceder a otras pantallas.
+    // El backend tambien restringe las rutas hasta completar el cambio.
+    if (R2.token && R2.usuario?.debe_cambiar_password && id !== 'a1') {
+      abrirCambioClave();
+      return;
+    }
     if (cur === 'act58resultado' && id !== 'act58resultado') borrarSensibles();
     if (id === 'bdir' || id === 'bid') { borrarSensibles(); return goProto('act58identity'); }
     if (id === 'c8') { borrarSensibles(); return goProto('act58contact'); }
@@ -557,6 +684,7 @@
         catch (e) { toast(act58.mensajeError(e), 'err'); }
       });
     }
+
     // Paso 1: correo y contraseña
     if (cur === 'a1' && id === 'a2') {
       return conEspera(async () => {
@@ -572,6 +700,7 @@
         }
       });
     }
+
     // Paso 2: código de la app o código de recuperación
     if ((cur === 'a2' || cur === 'a2r') && (id === 'a3' || id === 'a2c')) {
       return conEspera(async () => {
@@ -579,7 +708,14 @@
         if (cur === 'a2') cuerpo.codigo = val('otp').replace(/\s/g, ''); else cuerpo.codigo_recuperacion = val('rc');
         try {
           const r = await api('POST', '/auth/login/mfa', cuerpo, false);
-          R2.token = r.token; S.otpErr = ''; aplicarUsuario(r.usuario);
+          R2.token = r.token;
+          R2.tmp = null;
+          S.otpErr = '';
+          aplicarUsuario(r.usuario);
+          if (r.usuario.debe_cambiar_password) {
+            abrirCambioClave();
+            return;
+          }
           try { await cargarEstudios(); } catch (e) { /* el panel se muestra igual */ }
           toast('Sesión iniciada como ' + r.usuario.nombre + ' (' + r.usuario.rol + ')', 'ok');
           goProto('a3');
@@ -590,18 +726,52 @@
         }
       });
     }
+
     // Cerrar sesión (menú lateral)
     if (id === 'a1' && R2.token) {
-      const t = R2.token; R2.token = null; R2.tmp = null;
-      R2.participaciones.clear(); R2.estudioParticipacion.clear(); R2.idsConsentimiento.clear();
-      borrarSensibles(); R2.eventoTipo = null; R2.documentos = null; R2.altaProceso = null;
-      R2.confirmacion = null; R2.ficha = null; S.alta = null;
-      fetch(API + '/auth/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + t } }).catch(() => {});
-      toast('Sesión cerrada: el token ya no sirve.', 'ok');
-      S.err = false; return goProto('a1');
+      return conEspera(async () => {
+        try {
+          // Esperar la confirmación del backend antes de cerrar la sesión local.
+          await api('POST', '/auth/logout');
+
+          // Eliminar los datos de autenticación y de la sesión anterior.
+          R2.token = null;
+          R2.tmp = null;
+          R2.correo = null;
+          R2.usuario = null;
+          R2.estudios = [];
+
+          // Limpiar datos relacionados con participantes y consentimientos.
+          R2.participaciones.clear();
+          R2.estudioParticipacion.clear();
+          R2.idsConsentimiento.clear();
+          borrarSensibles();
+
+          R2.eventoTipo = null;
+          R2.documentos = null;
+          R2.altaProceso = null;
+          R2.confirmacion = null;
+          R2.ficha = null;
+          R2.pantallaAnterior = null;
+          S.alta = null;
+          S.err = false;
+          ocultarCambioClave();
+
+          // Volver al ingreso solamente después del cierre exitoso.
+          goProto('a1');
+          toast('Sesión cerrada correctamente.', 'ok');
+        } catch (e) {
+          toast(
+            e.mensaje || 'No se pudo cerrar la sesión. Inténtalo nuevamente.',
+            'err'
+          );
+        }
+      });
     }
+
     // Sin sesión real no se entra a pantallas internas
     if (!R2.token && !id.startsWith('a')) { toast('Primero inicia sesión.', 'err'); return goProto('a1'); }
+
     // Estudios y participantes
     if (id === 'c1') return conEspera(async () => { try { await cargarEstudios(); } catch (e) { toast(e.mensaje || 'No se pudieron cargar los estudios', 'err'); } goProto('c1'); });
     if (id === 'c3') return conEspera(async () => { try { await cargarParticipantes(S.ceId); } catch (e) { toast(e.mensaje || 'Sin permiso para ver participantes', 'err'); return; } goProto('c3'); });
@@ -617,6 +787,7 @@
         catch (e) { toast(e.mensaje || e.message || 'No se pudo abrir la ficha.', 'err'); }
       });
     }
+
     // B4: inscribir y luego guardar la decisión con la evidencia requerida.
     // Si falla el segundo POST se conserva el UUID en memoria: no se repite la inscripción.
     if (cur === 'b4' && id === 'b5' && !S.recons) {
@@ -671,7 +842,7 @@
     }
   });
 
-    // Guardar estudio (C2): si el código ya existe, lo edita; si no, lo crea
+  // Guardar estudio (C2): si el código ya existe, lo edita; si no, lo crea
   document.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-act="estGuardar"]'); if (!b) return;
     e.preventDefault(); e.stopImmediatePropagation();
@@ -693,6 +864,153 @@
       }
     });
   }, true);
+
+  // ---------- ACT73_DOCUMENTOS_REAL: versiones PDF de consentimiento ----------
+  // Se reemplazan solamente d1/d2; no se simulan archivos de sesiones.
+  const ACT73_MAX_PDF = 10 * 1024 * 1024;
+  const ACT73_VERSION_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$/;
+  let act73Documentos = [];
+  let act73EstudioConsultado = null;
+  let act73ErrorConsulta = '';
+
+  async function consultarDocumentosAct73(codigo) {
+    act73Documentos = [];
+    act73EstudioConsultado = codigo;
+    act73ErrorConsulta = '';
+    const id = uuidDe(codigo);
+    if (!id) return;
+    try {
+      act73Documentos = lista(await api('GET', '/estudios/' + encodeURIComponent(id) + '/documentos-consentimiento'));
+    } catch (e) {
+      act73ErrorConsulta = e.mensaje || 'No se pudieron consultar los documentos del estudio.';
+    }
+  }
+
+  R.d2 = () => {
+    const estudio = STUDIES.find(s => s.id === S.fstudy);
+    const docs = act73EstudioConsultado === S.fstudy ? act73Documentos : [];
+    const error = act73EstudioConsultado === S.fstudy ? act73ErrorConsulta : '';
+    const opciones = STUDIES.map(s => `<option value="${h(s.id)}" ${s.id === S.fstudy ? 'selected' : ''}>${h(s.id)} · ${h(s.n)}</option>`).join('');
+    const permiteCarga = estudio && estudio.e !== 'Cerrado' && ['Director', 'Investigador', 'Asistente'].includes(S.role);
+    return shell('d2', `<div class="card wide">
+      <h2 class="t">Documentos de consentimiento</h2>
+      <p class="sub">Versiones PDF registradas en la API. Los audios, videos y archivos de sesiones no se administran desde este módulo.</p>
+      <div class="fld" style="max-width:580px"><label for="act73Estudio">Estudio</label>
+        <select id="act73Estudio"><option value="">Selecciona un estudio</option>${opciones}</select></div>
+      ${!estudio ? '<div class="msg info">Selecciona un estudio para consultar sus documentos.</div>' :
+        error ? `<div class="msg err" role="alert">${h(error)}</div>` :
+        !docs.length ? '<div class="msg info">No hay documentos registrados para este estudio.</div>' :
+        `<div class="tw"><table><tr><th>Tipo</th><th>Versión</th><th>Estado</th><th>Huella SHA-256</th></tr>
+        ${docs.map(d => `<tr><td>${h(d.tipo || '—')}</td><td>${h(d.version || '—')}</td>
+          <td>${d.vigente ? '<span class="pill ok">Vigente</span>' : '<span class="pill n">Anterior</span>'}</td>
+          <td><code style="overflow-wrap:anywhere">${h(d.documento_hash || '—')}</code></td></tr>`).join('')}
+        </table></div>`}
+      ${estudio?.e === 'Cerrado' ? '<div class="msg warn">Estudio cerrado: no se pueden subir nuevas versiones.</div>' : ''}
+      <div class="acts"><span></span>
+        ${permiteCarga ? '<button type="button" class="btn p" data-go="d1">+ Nueva versión PDF</button>' : ''}
+      </div>
+    </div>`);
+  };
+
+  R.d1 = () => {
+    const estudio = STUDIES.find(s => s.id === S.fstudy);
+    if (!estudio) return shell('d2', `<div class="card"><h2 class="t">Selecciona primero un estudio</h2>${btn('Volver', 'd2', 's')}</div>`);
+    return shell('d2', `<div class="card">
+      <h2 class="t">Subir nueva versión de consentimiento</h2>
+      <p class="sub">Estudio: <b>${h(estudio.id)}</b> · ${h(estudio.n)}</p>
+      <div class="msg info">El nuevo PDF reemplaza la versión vigente del mismo tipo, pero mantiene su registro histórico.</div>
+      <form id="act73-form-doc">
+        <div class="fld"><label for="act73Tipo">Tipo</label><select id="act73Tipo" required>
+          <option value="consentimiento">Consentimiento</option><option value="asentimiento">Asentimiento</option></select></div>
+        <div class="fld"><label for="act73Version">Nueva versión (por ejemplo v1.2)</label>
+          <input id="act73Version" placeholder="v1.2" maxlength="20" required autocomplete="off">
+          <div class="hint">1 a 20 caracteres: letras, números, punto, guion y guion bajo.</div></div>
+        <div class="fld"><label for="act73Archivo">Archivo PDF</label>
+          <input id="act73Archivo" type="file" accept=".pdf,application/pdf" required>
+          <div class="hint">Solo PDF de hasta 10 MB. El servidor revisa también su contenido.</div></div>
+        <p id="act73Error" role="alert" style="color:#B42318;font-size:13px"></p>
+        <div class="acts">${btn('Cancelar', 'd2', 's')}
+          <button type="submit" class="btn p">Subir versión</button></div>
+      </form>
+    </div>`);
+  };
+
+  document.addEventListener('change', e => {
+    if (e.target?.id !== 'act73Estudio') return;
+    S.fstudy = e.target.value || null;
+    conEspera(async () => {
+      await consultarDocumentosAct73(S.fstudy);
+      goProto('d2');
+    });
+  });
+
+  document.addEventListener('submit', e => {
+    if (e.target?.id !== 'act73-form-doc') return;
+    e.preventDefault();
+    if (ocupado) return;
+    const uuid = uuidDe(S.fstudy);
+    const tipo = document.getElementById('act73Tipo').value;
+    const version = document.getElementById('act73Version').value.trim();
+    const archivo = document.getElementById('act73Archivo').files[0];
+    const salida = document.getElementById('act73Error');
+    salida.textContent = '';
+    if (!R2.token || !uuid) { salida.textContent = 'Selecciona un estudio e inicia sesión.'; return; }
+    if (!['Director', 'Investigador', 'Asistente'].includes(S.role)) {
+      salida.textContent = 'Tu rol no puede subir documentos desde esta pantalla.'; return;
+    }
+    if (!['consentimiento', 'asentimiento'].includes(tipo)) { salida.textContent = 'Selecciona un tipo válido.'; return; }
+    if (!ACT73_VERSION_RE.test(version)) { salida.textContent = 'Versión inválida: hasta 20 caracteres, letras, números, punto o guion.'; return; }
+    if (!archivo) { salida.textContent = 'Selecciona un archivo PDF.'; return; }
+    if (!/\.pdf$/i.test(archivo.name) || (archivo.type && archivo.type !== 'application/pdf')) {
+      salida.textContent = 'Solo se admiten archivos PDF.'; return;
+    }
+    if (archivo.size === 0 || archivo.size > ACT73_MAX_PDF) {
+      salida.textContent = 'El PDF debe tener contenido y no superar los 10 MB.'; return;
+    }
+    const form = new FormData();
+    form.append('tipo', tipo);
+    form.append('version', version);
+    form.append('archivo', archivo, archivo.name);
+    conEspera(async () => {
+      try {
+        await apiArchivo('/estudios/' + encodeURIComponent(uuid) + '/documentos-consentimiento', form);
+        await consultarDocumentosAct73(S.fstudy);
+        goProto('d2');
+        toast('Nueva versión registrada correctamente.', 'ok');
+      } catch (err) {
+        const mensaje = err.codigo === 'VERSION_DUPLICADA' ? 'Esa versión ya existe para este tipo de documento.' :
+          err.codigo === 'ARCHIVO_MUY_GRANDE' ? 'El PDF supera 10 MB.' :
+          err.status === 403 ? 'No tienes permiso de carga en este estudio.' :
+          (err.mensaje || 'No se pudo subir el documento.');
+        const aviso = document.getElementById('act73Error');
+        if (aviso) aviso.textContent = mensaje;
+        else toast(mensaje, 'err');
+      }
+    });
+  }, true);
+
+  const act73GoAnterior = go;
+  go = function (id) {
+    if (id === 'a1') {
+      act73Documentos = []; act73EstudioConsultado = null; act73ErrorConsulta = '';
+      return act73GoAnterior(id);
+    }
+    if (!['d1', 'd2'].includes(id) || !R2.token || R2.usuario?.debe_cambiar_password)
+      return act73GoAnterior(id);
+    if (id === 'd2') return conEspera(async () => {
+      await consultarDocumentosAct73(S.fstudy);
+      goProto('d2');
+    });
+    const estudio = STUDIES.find(s => s.id === S.fstudy);
+    if (!estudio) { toast('Selecciona primero un estudio.', 'err'); return go('d2'); }
+    if (estudio.e === 'Cerrado') { toast('No se puede cargar en un estudio cerrado.', 'err'); return; }
+    if (!['Director', 'Investigador', 'Asistente'].includes(S.role)) {
+      toast('Tu rol no permite subir documentos.', 'err'); return;
+    }
+    return goProto('d1');
+  };
+
+
   // Arranque: siempre desde el ingreso
   S.err = false; goProto('a1');
 })();
