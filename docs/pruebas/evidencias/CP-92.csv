@@ -1,0 +1,5 @@
+﻿id_auditoria,id_usuario,correo_intentado,id_sesion,ip,entidad,id_registro_afectado,id_estudio,accion,resultado,justificacion,id_autorizacion,fecha_hora
+"f906005f-125a-46d3-b277-25588dfb6b2a","90a3e391-7aea-5fc7-a26f-308bc624cb1d",,"4c997f52-6f75-438b-9797-ba40728aa810","::1","identidad",,,"leer","error",,,"2026-11-11T17:39:12.386Z"
+"0f50f791-ed5f-44c5-85ff-f46dc0eb34b9","f4c13880-ed8a-5b4c-8ce7-f6ddfd84d063",,"9198bc98-6b46-401d-9f9f-63dc5c223c11","::1","identidad",,"82bbf931-bc9f-594d-8203-77dc4608f2cc","desenmascarar","error","prueba de flujo frontend",,"2026-11-11T17:39:12.371Z"
+"6f0e804a-9815-4339-8fa1-01c517fbf202","f709e3ea-c031-5ded-9a0e-9b6188d3eb90",,"938d24f4-2e53-4f88-b4ec-1ae6d141c7ad","::1","documento_consentimiento",,"82bbf931-bc9f-594d-8203-77dc4608f2cc","leer","exito",,,"2026-11-11T17:39:12.355Z"
+"558c49d8-5975-485b-881a-6e04af48d219","f709e3ea-c031-5ded-9a0e-9b6188d3eb90",,"938d24f4-2e53-4f88-b4ec-1ae6d141c7ad","::1","participacion",,"82bbf931-bc9f-594d-8203-77dc4608f2cc","leer","exito",,,"2026-11-11T17:39:12.333Z"
