@@ -1,30 +1,51 @@
 # Hallazgos de Seguridad - Actividad 74
 
-## H-25 (CRÍTICO): adm-zip con 8 CVEs de severidad alta
+## H-25 (RECLASIFICADO - RIESGO ACEPTADO): adm-zip con CVEs
+
+**Estado original:** Crítico.
+**Estado tras aclaración del equipo:** Aceptado con justificación técnica.
 
 **Paquete:** `adm-zip <=0.6.0`
 **Usado en:** `src/services/exportacionesService.js` (Act 60/62)
-**CVEs reportados por npm audit:**
-- GHSA-xcpc-8h2w-3j85 (4GB memory allocation)
-- GHSA-vwc7-r8mq-g2x9 (symlink arbitrary file overwrite)
-- GHSA-7q85-xj36-vmfc (DoS por uncompressed size)
-- GHSA-rcw4-f5rp-g42v (bypass decompression-bomb)
-- GHSA-j5f4-cc29-5x44 (SUID/SGID privilege escalation)
-- GHSA-p634-w6r4-rjp2 (duplicate ZIP entry names)
-- GHSA-c6fg-446q-cg94 (bypass maxOutputLength)
-- GHSA-8238-w5pm-2374 (DoS en async DEFLATE)
+**CVEs reportados:** 8 CVEs de severidad alta (DoS, symlink, SUID, bypass, etc.)
 
-**Solución propuesta:** `npm audit fix --force` actualiza a `adm-zip@0.6.1`, pero es **breaking change**. 
-**Requiere:** decisión del Líder (Benjamín Barrientos) y re-prueba de las exportaciones de la Act 60/62 después de actualizar.
+**Justificación de la reclasificación (aportada por Benjamín Arias):**
+1. El backend **solo recibe PDFs** en cargas de usuario (no acepta ZIPs subidos por participantes).
+2. El límite de subida es de **10 MB**, lo que mitiga el vector de "4GB memory allocation".
+3. `adm-zip` se usa exclusivamente para **CREAR** los ZIPs de exportación (no para **EXTRAER** ZIPs de entrada).
+4. Las 8 CVEs son sobre extracción de ZIPs maliciosos. Si no hay endpoint que extraiga ZIPs del usuario, la superficie de ataque es mínima.
+
+**Riesgo real actual:** BAJO.
+**Riesgo futuro:** MEDIO, si en alguna actividad futura (importación masiva, restauración de backups, migración) se agrega un endpoint que reciba ZIPs del usuario.
+
+**Decisión:**
+- Se acepta el riesgo en el contexto actual.
+- Se actualizará `adm-zip@0.6.1` cuando haya tiempo y se re-probarán las exportaciones de la Act 60/62.
+- Si en el futuro se agrega un endpoint que reciba ZIPs, se deberá:
+  - Actualizar `adm-zip` obligatoriamente.
+  - Agregar límite de tamaño descomprimido (`maxOutputLength`).
+  - Validar que no haya symlinks en el ZIP antes de extraer.
 
 ## O-01 (OBSERVACIÓN): CORS no emite Access-Control-Allow-Origin
 
-**Contexto:** Al hacer `curl -sI -H "Origin: http://localhost:5173" http://localhost:3000/salud`, el backend responde sin cabecera `Access-Control-Allow-Origin`.
+**Contexto:** `curl -sI -H "Origin: http://localhost:5173" http://localhost:3000/salud` responde sin `Access-Control-Allow-Origin`.
 
-**Posibles causas:**
-- CORS no está configurado (frontend y backend deben servirse del mismo origen).
-- Está configurado con lista de orígenes vacía.
+**Análisis:**
+- El frontend actual (`frontend/prototipo.html`) se abre con `file://` en desarrollo, y no requiere CORS.
+- En producción, si el frontend y el backend se sirven desde el mismo origen, no requiere CORS.
+- Si en el futuro el frontend se sirve desde un dominio distinto, habrá que configurar CORS con whitelist explícita.
 
-**Riesgo:** Si el frontend corre en `localhost:5173` (Vite/React) o `localhost:3001` (Create React App), el navegador bloqueará las peticiones por CORS.
+**Riesgo actual:** BAJO (no bloquea el flujo actual).
+**Acción:** Documentar el comportamiento y configurar CORS cuando se despliegue el frontend en un dominio separado.
 
-**Pregunta al Líder:** ¿El frontend y backend se sirven desde el mismo origen en producción? Si no, hay que agregar el origen del frontend a la whitelist de CORS.
+**Sugerencia de implementación futura (snippet):**
+```javascript
+const cors = require('cors');
+const origenesPermitidos = ['https://app.plagesetic.cl', 'http://localhost:5173'];
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || origenesPermitidos.includes(origin)) return callback(null, true);
+    callback(new Error('Origen no permitido por CORS'));
+  },
+  credentials: true,
+}));
