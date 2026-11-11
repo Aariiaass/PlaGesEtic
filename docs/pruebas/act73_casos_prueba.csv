@@ -1,0 +1,9 @@
+ID,Caso,Precondicion,Entrada,Resultado esperado,Resultado obtenido,Estado
+CP-88,Verificar carga de vista de participantes,Usuario autenticado en frontend,GET /estudios/{id}/participaciones,200 con tabla de datos sin PII,,
+CP-89,Verificar carga de vista de consentimientos,Usuario autenticado en frontend,GET /estudios/{id}/documentos-consentimiento,200 con lista de documentos,,
+CP-90,Verificar boton desenmascarar,Director autenticado en frontend,POST /identidades/{id}/desenmascarar,200 con datos personales,,
+CP-91,Verificar bloqueo de estudiante,Estudiante autenticado en frontend,POST /identidades/buscar,403 en frontend,,
+CP-92,Verificar exportacion desde el frontend,Investigador autenticado,GET /auditoria/exportar,200 con CSV descargado,,
+CP-93,Verificar envio de archivo de consentimiento,Investigador autenticado,POST /participaciones/{id}/consentimientos,201 con evidencia guardada,,
+CP-94,Verificar retiro de consentimiento,Investigador autenticado,POST /consentimientos/{id}/eventos {tipo_evento:"retirar"},201 con participacion retirada,,
+CP-95,Verificar carga de auditoria en frontend,Director autenticado,GET /auditoria,200 con tabla de auditoria,,
