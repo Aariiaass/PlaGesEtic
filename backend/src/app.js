@@ -1,4 +1,5 @@
 'use strict';
+const { cabecerasSeguridad } = require('./middlewares/seguridad');
 const express = require('express');
 const crearRutas = require('./routes');
 const { rutaNoEncontrada, manejadorErrores } = require('./middlewares/manejadorErrores');
@@ -7,7 +8,8 @@ const { rutaNoEncontrada, manejadorErrores } = require('./middlewares/manejadorE
 function crearApp({ pool }) {
   const app = express();
   app.disable('x-powered-by');           // no revelar la tecnología del servidor
-  app.set('trust proxy', 1);             // req.ip correcto detrás de un proxy
+  app.set('trust proxy', 1);  
+  app.use(cabecerasSeguridad);
   app.use(express.json({ limit: '1mb' }));
   app.use(crearRutas(pool));
   app.use(rutaNoEncontrada);
