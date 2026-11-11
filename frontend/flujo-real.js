@@ -1,3 +1,4 @@
+
 /* plaGesEtic · Capa que conecta el prototipo navegable v2.3.1 con la API real (SOLO DEMO / DESARROLLO).
  * No cambia el diseño: reemplaza los datos de ejemplo por los de la API en estas pantallas:
  *   A1/A2  ingreso con contraseña + código (o código de recuperación)  → POST /auth/login, /auth/login/mfa
@@ -7,7 +8,9 @@
  *   B0-B5  alta de participante: busca, y al guardar la decisión del consentimiento registra la identidad cifrada
  *          e inscribe → POST /identidades(/buscar), /estudios/{id}/participaciones
  *   Cerrar sesión                                                      → POST /auth/logout
- * El resto de las pantallas sigue siendo el prototipo (aún no tiene API).
+ *   Cambio obligatorio de contraseña                                  → POST /auth/password
+ * Administración y archivos de sesión siguen pendientes de integración; exportaciones y consentimientos PDF usan la API.
+ * La experiencia continúa siendo una demo de desarrollo.
  */
 (function () {
   'use strict';
@@ -45,12 +48,14 @@
   .rl-qrlink{display:inline-block;margin:2px 0 8px;border:0;background:none;color:#1C2FB9;font:600 13px Inter,Arial,sans-serif;text-decoration:underline;cursor:pointer;padding:0}
   .rl-ver:hover{background:#DDE2FF}.rl-ver:focus-visible{outline:2px solid #253FF6;outline-offset:2px}`;
   document.head.appendChild(css);
+
   const badge = document.createElement('div'); badge.id = 'rl-badge'; badge.innerHTML = '<i></i>Conectado a la API real';
   const cel = document.createElement('div'); cel.id = 'rl-cel';
   cel.innerHTML = '<small>Celular simulado · app de autenticación</small><div class="c" title="Clic para copiarlo al campo">------</div><div class="b"><div></div></div><small style="margin-top:6px" id="rl-cel-u"></small>';
   const toastEl = document.createElement('div'); toastEl.id = 'rl-toast';
   const qrEl = document.createElement('div'); qrEl.id = 'rl-qr'; qrEl.setAttribute('role', 'dialog'); qrEl.setAttribute('aria-modal', 'true');
   document.body.append(badge, cel, toastEl, qrEl);
+
   async function mostrarQR() {
     if (!R2.correo) return;
     let uri = '';
@@ -65,6 +70,7 @@
       <div class="row"><button type="button" data-act="qrX">Listo</button></div></div>`;
     qrEl.style.display = 'flex';
   }
+
   qrEl.addEventListener('click', (e) => { if (e.target === qrEl || e.target.closest('[data-act="qrX"]')) qrEl.style.display = 'none'; });
   let tt;
   function toast(msg, tipo) { toastEl.textContent = msg; toastEl.className = tipo || ''; toastEl.style.display = 'block'; clearTimeout(tt); tt = setTimeout(() => (toastEl.style.display = 'none'), 4200); }
@@ -80,6 +86,7 @@
     if (!r.ok) throw Object.assign({ status: r.status }, j.error || { codigo: 'ERROR', mensaje: 'Error ' + r.status });
     return j;
   }
+
   // FormData: el navegador asigna el boundary; no enviar Content-Type manualmente.
   async function apiArchivo(ruta, datos) {
     let respuesta, cuerpo = {};
@@ -103,6 +110,7 @@
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const lista = (respuesta) => Array.isArray(respuesta) ? respuesta : (respuesta.datos || []);
   const VERSION_FALTA = 'Este estudio no tiene un documento de consentimiento vigente. Solicita que lo carguen antes de continuar.';
+
   async function documentosVigentes() {
     const estudio = uuidDe(S.study);
     if (!estudio) throw new Error('Selecciona un estudio activo antes de registrar la decisión.');
@@ -111,6 +119,7 @@
     if (!vigente || !vigente.version) throw new Error(VERSION_FALTA);
     R2.documentos = { consentimiento: vigente };
   }
+
   // API del consentimiento: se usa un servicio reutilizable y comprobable por separado.
   const act58 = window.PlaGesActividad58;
   if (!act58) throw new Error('No se cargó actividad58-eventos.js');
@@ -129,11 +138,13 @@
       if (j.codigo) { cel.querySelector('.c').textContent = j.codigo.slice(0, 3) + ' ' + j.codigo.slice(3); cel.querySelector('.b>div').style.width = (j.segundos_restantes / 30 * 100) + '%'; document.getElementById('rl-cel-u').textContent = R2.correo; }
     } catch (e) { /* ignora */ }
   }, 1000);
+
   cel.querySelector('.c').onclick = () => { const o = document.getElementById('otp'); if (o) o.value = cel.querySelector('.c').textContent.replace(/\s/g, ''); };
 
   // ---------- datos reales → estructuras del prototipo ----------
   const FECHA = (d) => (d ? String(d).slice(0, 10).split('-').reverse().join('/') : '—');
   const ESTADO = { activo: 'Activo', borrador: 'Borrador', cerrado: 'Cerrado' };
+
   async function cargarEstudios() {
     const lista = await api('GET', '/estudios');
     R2.estudios = Array.isArray(lista) ? lista : (lista.datos || []);
@@ -150,7 +161,9 @@
     for (const s of nuevos) { try { await cargarParticipantes(s.id, true); } catch (x) { /* sin permiso */ } }
     if (STUDIES[0]) S.ceId = STUDIES[0].id;
   }
+
   const uuidDe = (codigo) => (STUDIES.find((s) => s.id === codigo) || {})._uuid;
+
   async function cargarParticipantes(codigo, acumular) {
     const id = uuidDe(codigo); if (!id) return;
     const ps = await api('GET', '/estudios/' + id + '/participaciones');
@@ -165,6 +178,7 @@
         p.estado === 'activo' ? 'ok' : 'err', FECHA(p.fecha_inicio), p.es_menor_al_enrolar ? 'Sí' : 'No']);
     });
   }
+
   function aplicarUsuario(u) {
     R2.usuario = u;
     const rol = ROLES.includes(u.rol) ? u.rol : 'Investigador';
@@ -180,20 +194,25 @@
     .replace(/<label class="chk">[\s\S]*?<\/label>/, '')
     .replace('<button class="lnk" data-act="err">Simular contraseña incorrecta</button>', '<span class="hint">Usuarios de prueba: test_[rol]@uxlab.test · clave Plagesetic.2026</span>')
     .replace('Usuario o contraseña incorrectos.', S.errMsg || 'Usuario o contraseña incorrectos.');
+
   const a2V = R.a2;
   R.a2 = () => a2V().replace('<button class="lnk" data-go="a2r">', (S.otpErr ? `<div class="msg err" role="alert">${S.otpErr}</div>` : '') + '<button type="button" class="rl-qrlink" data-act="verqr">¿Primera vez? Configura tu celular con un código QR</button><br><button class="lnk" data-go="a2r">');
+
   const a2rV = R.a2r;
   R.a2r = () => a2rV().replace('<button class="lnk" data-go="a2">', (S.otpErr ? `<div class="msg err" role="alert">${S.otpErr}</div>` : '') + '<button class="lnk" data-go="a2">');
+
   // Mis estudios: cada fila abre SU estudio (el prototipo esperaba códigos UX-2026-0X)
   const c1V = R.c1;
   R.c1 = () => c1V().replace(/<tr><td><code>([^<]+)<\/code><\/td>([\s\S]*?)<\/tr>/g, (m, id, resto) =>
     `<tr><td><code>${id}</code></td>` + resto
       .replace('<button class="lnk" data-go="c3">Ver</button>', `<button class="lnk" data-act="stuVer" data-id="${id}">Ver participantes</button>`)
       .replace('<button class="lnk" data-go="c2">Editar</button>', `<button class="lnk" data-act="stuEdit" data-id="${id}">Editar</button>`) + '</tr>');
-        // Buscador de estudios (C1): filtra las filas por código o nombre, sin llamar a la API
+
+  // Buscador de estudios (C1): filtra las filas por código o nombre, sin llamar a la API
   const c1Base = R.c1;
   R.c1 = () => c1Base().replace('<div class="tw">',
     '<div class="fld"><input id="buscaEst" type="search" placeholder="Buscar por código o nombre"></div><div class="tw">');
+
   document.addEventListener('input', (e) => {
     if (e.target.id !== 'buscaEst') return;
     const texto = e.target.value.trim().toLowerCase();
@@ -202,13 +221,16 @@
       fila.style.display = fila.textContent.toLowerCase().includes(texto) ? '' : 'none';
     });
   });
-      // Textos de «prototipo» → datos reales
+
+  // Textos de «prototipo» → datos reales
   const shellV = shell;
   shell = function (mc, inner) { return shellV(mc, inner).replace('· nombre ficticio', '· usuario de prueba'); };
   const a3V = R.a3;
   R.a3 = () => a3V().replace(/· PROTOTIPO/gi, '· plaGesEtic');
-    const c2V = R.c2;
+
+  const c2V = R.c2;
   R.c2 = () => c2V().replace(btn('Guardar', 'c1', 's'), '<button class="btn s" data-act="estGuardar">Guardar</button>');
+
   const c3V = R.c3;
   R.c3 = () => {
     const s = STUDIES.find((x) => x.id === S.ceId) || STUDIES[0] || { id: '—', n: '' };
@@ -368,11 +390,13 @@
   const fichaActual = () => R2.ficha && R2.ficha.codigo === S.ficha ? R2.ficha : null;
   const idParticipacionActual = () => R2.participaciones.get(S.ficha);
   const avisoD21 = '<div class="msg warn"><b>Privacidad D21:</b> no escribas nombres, RUT, correos ni otros datos identificatorios en el motivo, la observación o la justificación.</div>';
+
   function borrarSensibles() {
     // Los datos solo viven durante la pantalla que los muestra, nunca en storage/logs.
     R2.sensible = null;
     R2.contactoMotivo = null;
   }
+
   async function idConsentimientoActual() {
     const id = idParticipacionActual();
     if (!id) throw new Error('No se encontró la participación. Vuelve a cargar sus participantes.');
@@ -387,6 +411,7 @@
     R2.idsConsentimiento.set(id, r.id_consentimiento);
     return r.id_consentimiento;
   }
+
   async function abrirEvento(tipo) {
     if (!fichaActual()) await cargarFicha(S.ficha);
     if (!tipoActual()) throw new Error('No existe un consentimiento registrado para esta participación.');
@@ -407,6 +432,7 @@
     }
     goProto('act58evento');
   }
+
   R.act58evento = () => {
     const retiro = R2.eventoTipo === 'retirar';
     const actual = tipoActual() || {};
@@ -423,6 +449,7 @@
       <div class="acts">${btn('Cancelar','c6','s')}
         <button type="button" class="btn p" data-act="act58GuardarEvento">${retiro?'Confirmar retiro':'Guardar reconsentimiento'}</button></div></div>`);
   };
+
   async function guardarEvento() {
     if (!R2.eventoTipo) throw new Error('Selecciona un evento.');
     const tipo = R2.eventoTipo;
@@ -446,6 +473,7 @@
     toast(tipo === 'retirar' ? 'Retiro registrado en la API.' : 'Reconsentimiento registrado en la API.', 'ok');
     goProto('c6');
   }
+
   R.act58contact = () => shell('c1', `<div class="card"><h2 class="t">Datos de contacto · ${h(S.ficha || '—')}</h2>
     <p class="sub">Acceso excepcional para el Investigador responsable o el Director. La consulta queda auditada.</p>
     ${avisoD21}
@@ -456,6 +484,7 @@
     <div class="fld"><label for="act58Detalle">Detalle para «Otro»</label>
     <textarea id="act58Detalle" rows="3" placeholder="Explica el propósito sin datos identificatorios"></textarea></div>
     <div class="acts">${btn('Cancelar','c6','s')}<button class="btn p" data-act="act58ConsultarContacto">Consultar contacto</button></div></div>`);
+
   async function consultarContacto() {
     const id = idParticipacionActual();
     if (!id) throw new Error('No se encontró la participación.');
@@ -466,6 +495,7 @@
     R2.contactoMotivo = motivo;
     goProto('act58resultado');
   }
+
   R.act58identity = () => {
     const codigoEstudio = R2.estudioParticipacion.get(S.ficha) || S.ceId;
     const estudios = STUDIES.map(s => `<option value="${h(s.id)}" ${s.id === codigoEstudio ? 'selected' : ''}>${h(s.id)} · ${h(s.n)}</option>`).join('');
@@ -480,6 +510,7 @@
     <div class="acts">${btn('Cancelar', fichaActual() ? 'c6' : 'a3','s')}
       <button class="btn p" data-act="act58Desenmascarar">Solicitar desenmascaramiento</button></div></div>`);
   };
+
   async function consultarIdentidad() {
     const ux = val('act58UXL').toUpperCase();
     const uuid = uuidDe(val('act58Estudio'));
@@ -491,6 +522,7 @@
     R2.sensible = { clase: 'identidad', datos: act58.soloIdentidad(resultado) };
     goProto('act58resultado');
   }
+
   R.act58resultado = () => {
     const datos = R2.sensible;
     if (!datos) return shell('c1', `<div class="card"><h2 class="t">Datos no disponibles</h2>
@@ -504,6 +536,7 @@
       ${campos.map(([key, titulo]) => `<tr><td>${titulo}</td><td>${h(datos.datos[key] ?? '—')}</td></tr>`).join('')}</table></div>
       <div class="acts"><button type="button" class="btn p" data-act="act58CerrarSensibles">Cerrar y borrar datos</button></div></div>`);
   };
+
   // Captura de los botones heredados del prototipo ANTES de que puedan activar sus simulaciones.
   // No se emiten datos personales a consola, storage ni a otros componentes.
   const accionAct58 = async (accion) => {
@@ -518,6 +551,7 @@
       else if (accion === 'act58CerrarSensibles') { borrarSensibles(); go('a3'); }
     } catch (e) { toast(act58.mensajeError(e), 'err'); }
   };
+
   const accionesAct58 = new Set(['act58RetiroForm','act58ReconsForm','act58ContactForm','contacto',
     'act58IdentityForm','act58GuardarEvento','act58ConsultarContacto','contactOk','act58Desenmascarar',
     'act58CerrarSensibles','retirar']);
@@ -547,7 +581,100 @@
   }
   const val = (id) => ((document.getElementById(id) || {}).value || '').trim();
 
+  // ---------- Actividad 73: cambio obligatorio de contrasena ----------
+  // Este formulario se abre solamente despues de verificar el MFA.
+  // No guarda contrasenas en localStorage, sessionStorage ni en la consola.
+  const cambioClave = document.createElement('div');
+  cambioClave.id = 'rl-cambio-clave';
+  cambioClave.setAttribute('role', 'dialog');
+  cambioClave.setAttribute('aria-modal', 'true');
+  cambioClave.setAttribute('aria-labelledby', 'rl-cambio-titulo');
+  cambioClave.style.cssText = 'display:none;position:fixed;inset:0;z-index:10010;background:rgba(11,14,50,.88);align-items:center;justify-content:center;padding:16px';
+  cambioClave.innerHTML = `
+    <form id="rl-form-cambio" style="background:#fff;color:#131315;width:100%;max-width:440px;padding:26px;border-radius:16px;font-family:Inter,Arial,sans-serif;box-shadow:0 20px 50px rgba(0,0,0,.3)">
+      <h2 id="rl-cambio-titulo" style="color:#000B78;margin:0 0 10px;font-size:21px">Cambio obligatorio de contraseña</h2>
+      <p style="font-size:14px;line-height:1.5;margin:0 0 14px">Por seguridad, debes reemplazar tu contraseña temporal antes de usar el sistema.</p>
+      <label for="rl-clave-actual" style="display:block;margin-top:14px;font-size:14px">Contraseña temporal</label>
+      <input id="rl-clave-actual" type="password" autocomplete="current-password" required
+        style="width:100%;box-sizing:border-box;padding:10px;margin-top:5px">
+      <label for="rl-clave-nueva" style="display:block;margin-top:14px;font-size:14px">Nueva contraseña (mínimo 12 caracteres)</label>
+      <input id="rl-clave-nueva" type="password" autocomplete="new-password" minlength="12" required
+        style="width:100%;box-sizing:border-box;padding:10px;margin-top:5px">
+      <label for="rl-clave-confirmar" style="display:block;margin-top:14px;font-size:14px">Confirmar nueva contraseña</label>
+      <input id="rl-clave-confirmar" type="password" autocomplete="new-password" minlength="12" required
+        style="width:100%;box-sizing:border-box;padding:10px;margin-top:5px">
+      <p id="rl-cambio-error" role="alert" aria-live="polite" style="color:#B42318;font-size:13px;min-height:18px"></p>
+      <button id="rl-cambio-guardar" type="submit"
+        style="width:100%;background:#000B78;color:#fff;border:0;border-radius:9px;padding:12px;cursor:pointer">Actualizar contraseña</button>
+      <button id="rl-cambio-salir" type="button"
+        style="width:100%;margin-top:10px;background:#eee;color:#131315;border:0;border-radius:9px;padding:10px;cursor:pointer">Cerrar sesión</button>
+    </form>`;
+  document.body.appendChild(cambioClave);
+
+  function abrirCambioClave() {
+    cambioClave.style.display = 'flex';
+    document.getElementById('rl-cambio-error').textContent = '';
+    document.getElementById('rl-clave-actual').focus();
+  }
+
+  function ocultarCambioClave() {
+    cambioClave.querySelector('#rl-form-cambio').reset();
+    cambioClave.style.display = 'none';
+  }
+
+  cambioClave.querySelector('#rl-form-cambio').addEventListener('submit', async (evento) => {
+    evento.preventDefault();
+    if (!R2.token || !R2.usuario?.debe_cambiar_password) return;
+
+    const actual = document.getElementById('rl-clave-actual').value;
+    const nueva = document.getElementById('rl-clave-nueva').value;
+    const confirmar = document.getElementById('rl-clave-confirmar').value;
+    const error = document.getElementById('rl-cambio-error');
+    const boton = document.getElementById('rl-cambio-guardar');
+    error.textContent = '';
+
+    if (nueva.length < 12) {
+      error.textContent = 'La nueva contraseña debe tener al menos 12 caracteres.';
+      return;
+    }
+    if (nueva === actual) {
+      error.textContent = 'La nueva contraseña debe ser distinta de la temporal.';
+      return;
+    }
+    if (nueva !== confirmar) {
+      error.textContent = 'Las contraseñas nuevas no coinciden.';
+      return;
+    }
+
+    boton.disabled = true;
+    try {
+      await api('POST', '/auth/password', { password_actual: actual, password_nueva: nueva });
+      R2.usuario.debe_cambiar_password = false;
+      ocultarCambioClave();
+      try { await cargarEstudios(); } catch (_) { /* El panel se muestra igualmente. */ }
+      goProto('a3');
+      toast('Contraseña actualizada correctamente.', 'ok');
+    } catch (err) {
+      error.textContent = err.mensaje || 'No se pudo actualizar la contraseña.';
+    } finally {
+      boton.disabled = false;
+    }
+  });
+
+  cambioClave.querySelector('#rl-cambio-salir').addEventListener('click', async () => {
+    await go('a1');
+    if (!R2.token) ocultarCambioClave();
+    else document.getElementById('rl-cambio-error').textContent =
+      'No se pudo cerrar la sesión. Inténtalo nuevamente.';
+  });
+
   go = function (id) {
+    // Mientras se deba cambiar la contrasena, no se puede acceder a otras pantallas.
+    // El backend tambien restringe las rutas hasta completar el cambio.
+    if (R2.token && R2.usuario?.debe_cambiar_password && id !== 'a1') {
+      abrirCambioClave();
+      return;
+    }
     if (cur === 'act58resultado' && id !== 'act58resultado') borrarSensibles();
     if (id === 'bdir' || id === 'bid') { borrarSensibles(); return goProto('act58identity'); }
     if (id === 'c8') { borrarSensibles(); return goProto('act58contact'); }
@@ -557,6 +684,7 @@
         catch (e) { toast(act58.mensajeError(e), 'err'); }
       });
     }
+
     // Paso 1: correo y contraseña
     if (cur === 'a1' && id === 'a2') {
       return conEspera(async () => {
@@ -572,6 +700,7 @@
         }
       });
     }
+
     // Paso 2: código de la app o código de recuperación
     if ((cur === 'a2' || cur === 'a2r') && (id === 'a3' || id === 'a2c')) {
       return conEspera(async () => {
@@ -579,7 +708,14 @@
         if (cur === 'a2') cuerpo.codigo = val('otp').replace(/\s/g, ''); else cuerpo.codigo_recuperacion = val('rc');
         try {
           const r = await api('POST', '/auth/login/mfa', cuerpo, false);
-          R2.token = r.token; S.otpErr = ''; aplicarUsuario(r.usuario);
+          R2.token = r.token;
+          R2.tmp = null;
+          S.otpErr = '';
+          aplicarUsuario(r.usuario);
+          if (r.usuario.debe_cambiar_password) {
+            abrirCambioClave();
+            return;
+          }
           try { await cargarEstudios(); } catch (e) { /* el panel se muestra igual */ }
           toast('Sesión iniciada como ' + r.usuario.nombre + ' (' + r.usuario.rol + ')', 'ok');
           goProto('a3');
@@ -590,18 +726,52 @@
         }
       });
     }
+
     // Cerrar sesión (menú lateral)
     if (id === 'a1' && R2.token) {
-      const t = R2.token; R2.token = null; R2.tmp = null;
-      R2.participaciones.clear(); R2.estudioParticipacion.clear(); R2.idsConsentimiento.clear();
-      borrarSensibles(); R2.eventoTipo = null; R2.documentos = null; R2.altaProceso = null;
-      R2.confirmacion = null; R2.ficha = null; S.alta = null;
-      fetch(API + '/auth/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + t } }).catch(() => {});
-      toast('Sesión cerrada: el token ya no sirve.', 'ok');
-      S.err = false; return goProto('a1');
+      return conEspera(async () => {
+        try {
+          // Esperar la confirmación del backend antes de cerrar la sesión local.
+          await api('POST', '/auth/logout');
+
+          // Eliminar los datos de autenticación y de la sesión anterior.
+          R2.token = null;
+          R2.tmp = null;
+          R2.correo = null;
+          R2.usuario = null;
+          R2.estudios = [];
+
+          // Limpiar datos relacionados con participantes y consentimientos.
+          R2.participaciones.clear();
+          R2.estudioParticipacion.clear();
+          R2.idsConsentimiento.clear();
+          borrarSensibles();
+
+          R2.eventoTipo = null;
+          R2.documentos = null;
+          R2.altaProceso = null;
+          R2.confirmacion = null;
+          R2.ficha = null;
+          R2.pantallaAnterior = null;
+          S.alta = null;
+          S.err = false;
+          ocultarCambioClave();
+
+          // Volver al ingreso solamente después del cierre exitoso.
+          goProto('a1');
+          toast('Sesión cerrada correctamente.', 'ok');
+        } catch (e) {
+          toast(
+            e.mensaje || 'No se pudo cerrar la sesión. Inténtalo nuevamente.',
+            'err'
+          );
+        }
+      });
     }
+
     // Sin sesión real no se entra a pantallas internas
     if (!R2.token && !id.startsWith('a')) { toast('Primero inicia sesión.', 'err'); return goProto('a1'); }
+
     // Estudios y participantes
     if (id === 'c1') return conEspera(async () => { try { await cargarEstudios(); } catch (e) { toast(e.mensaje || 'No se pudieron cargar los estudios', 'err'); } goProto('c1'); });
     if (id === 'c3') return conEspera(async () => { try { await cargarParticipantes(S.ceId); } catch (e) { toast(e.mensaje || 'Sin permiso para ver participantes', 'err'); return; } goProto('c3'); });
@@ -617,6 +787,7 @@
         catch (e) { toast(e.mensaje || e.message || 'No se pudo abrir la ficha.', 'err'); }
       });
     }
+
     // B4: inscribir y luego guardar la decisión con la evidencia requerida.
     // Si falla el segundo POST se conserva el UUID en memoria: no se repite la inscripción.
     if (cur === 'b4' && id === 'b5' && !S.recons) {
@@ -671,7 +842,7 @@
     }
   });
 
-    // Guardar estudio (C2): si el código ya existe, lo edita; si no, lo crea
+  // Guardar estudio (C2): si el código ya existe, lo edita; si no, lo crea
   document.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-act="estGuardar"]'); if (!b) return;
     e.preventDefault(); e.stopImmediatePropagation();
@@ -693,6 +864,1000 @@
       }
     });
   }, true);
+
+  // ---------- ACT73_DOCUMENTOS_REAL: versiones PDF de consentimiento ----------
+  // Se reemplazan solamente d1/d2; no se simulan archivos de sesiones.
+  const ACT73_MAX_PDF = 10 * 1024 * 1024;
+  const ACT73_VERSION_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$/;
+  let act73Documentos = [];
+  let act73EstudioConsultado = null;
+  let act73ErrorConsulta = '';
+
+  async function consultarDocumentosAct73(codigo) {
+    act73Documentos = [];
+    act73EstudioConsultado = codigo;
+    act73ErrorConsulta = '';
+    const id = uuidDe(codigo);
+    if (!id) return;
+    try {
+      act73Documentos = lista(await api('GET', '/estudios/' + encodeURIComponent(id) + '/documentos-consentimiento'));
+    } catch (e) {
+      act73ErrorConsulta = e.mensaje || 'No se pudieron consultar los documentos del estudio.';
+    }
+  }
+
+  R.d2 = () => {
+    const estudio = STUDIES.find(s => s.id === S.fstudy);
+    const docs = act73EstudioConsultado === S.fstudy ? act73Documentos : [];
+    const error = act73EstudioConsultado === S.fstudy ? act73ErrorConsulta : '';
+    const opciones = STUDIES.map(s => `<option value="${h(s.id)}" ${s.id === S.fstudy ? 'selected' : ''}>${h(s.id)} · ${h(s.n)}</option>`).join('');
+    const permiteCarga = estudio && estudio.e !== 'Cerrado' && ['Director', 'Investigador', 'Asistente'].includes(S.role);
+    return shell('d2', `<div class="card wide">
+      <h2 class="t">Documentos de consentimiento</h2>
+      <p class="sub">Versiones PDF registradas en la API. Los audios, videos y archivos de sesiones no se administran desde este módulo.</p>
+      <div class="fld" style="max-width:580px"><label for="act73Estudio">Estudio</label>
+        <select id="act73Estudio"><option value="">Selecciona un estudio</option>${opciones}</select></div>
+      ${!estudio ? '<div class="msg info">Selecciona un estudio para consultar sus documentos.</div>' :
+        error ? `<div class="msg err" role="alert">${h(error)}</div>` :
+        !docs.length ? '<div class="msg info">No hay documentos registrados para este estudio.</div>' :
+        `<div class="tw"><table><tr><th>Tipo</th><th>Versión</th><th>Estado</th><th>Huella SHA-256</th></tr>
+        ${docs.map(d => `<tr><td>${h(d.tipo || '—')}</td><td>${h(d.version || '—')}</td>
+          <td>${d.vigente ? '<span class="pill ok">Vigente</span>' : '<span class="pill n">Anterior</span>'}</td>
+          <td><code style="overflow-wrap:anywhere">${h(d.documento_hash || '—')}</code></td></tr>`).join('')}
+        </table></div>`}
+      ${estudio?.e === 'Cerrado' ? '<div class="msg warn">Estudio cerrado: no se pueden subir nuevas versiones.</div>' : ''}
+      <div class="acts"><span></span>
+        ${permiteCarga ? '<button type="button" class="btn p" data-go="d1">+ Nueva versión PDF</button>' : ''}
+      </div>
+    </div>`);
+  };
+
+  R.d1 = () => {
+    const estudio = STUDIES.find(s => s.id === S.fstudy);
+    if (!estudio) return shell('d2', `<div class="card"><h2 class="t">Selecciona primero un estudio</h2>${btn('Volver', 'd2', 's')}</div>`);
+    return shell('d2', `<div class="card">
+      <h2 class="t">Subir nueva versión de consentimiento</h2>
+      <p class="sub">Estudio: <b>${h(estudio.id)}</b> · ${h(estudio.n)}</p>
+      <div class="msg info">El nuevo PDF reemplaza la versión vigente del mismo tipo, pero mantiene su registro histórico.</div>
+      <form id="act73-form-doc">
+        <div class="fld"><label for="act73Tipo">Tipo</label><select id="act73Tipo" required>
+          <option value="consentimiento">Consentimiento</option><option value="asentimiento">Asentimiento</option></select></div>
+        <div class="fld"><label for="act73Version">Nueva versión (por ejemplo v1.2)</label>
+          <input id="act73Version" placeholder="v1.2" maxlength="20" required autocomplete="off">
+          <div class="hint">1 a 20 caracteres: letras, números, punto, guion y guion bajo.</div></div>
+        <div class="fld"><label for="act73Archivo">Archivo PDF</label>
+          <input id="act73Archivo" type="file" accept=".pdf,application/pdf" required>
+          <div class="hint">Solo PDF de hasta 10 MB. El servidor revisa también su contenido.</div></div>
+        <p id="act73Error" role="alert" style="color:#B42318;font-size:13px"></p>
+        <div class="acts">${btn('Cancelar', 'd2', 's')}
+          <button type="submit" class="btn p">Subir versión</button></div>
+      </form>
+    </div>`);
+  };
+
+  document.addEventListener('change', e => {
+    if (e.target?.id !== 'act73Estudio') return;
+    S.fstudy = e.target.value || null;
+    conEspera(async () => {
+      await consultarDocumentosAct73(S.fstudy);
+      goProto('d2');
+    });
+  });
+
+  document.addEventListener('submit', e => {
+    if (e.target?.id !== 'act73-form-doc') return;
+    e.preventDefault();
+    if (ocupado) return;
+    const uuid = uuidDe(S.fstudy);
+    const tipo = document.getElementById('act73Tipo').value;
+    const version = document.getElementById('act73Version').value.trim();
+    const archivo = document.getElementById('act73Archivo').files[0];
+    const salida = document.getElementById('act73Error');
+    salida.textContent = '';
+    if (!R2.token || !uuid) { salida.textContent = 'Selecciona un estudio e inicia sesión.'; return; }
+    if (!['Director', 'Investigador', 'Asistente'].includes(S.role)) {
+      salida.textContent = 'Tu rol no puede subir documentos desde esta pantalla.'; return;
+    }
+    if (!['consentimiento', 'asentimiento'].includes(tipo)) { salida.textContent = 'Selecciona un tipo válido.'; return; }
+    if (!ACT73_VERSION_RE.test(version)) { salida.textContent = 'Versión inválida: hasta 20 caracteres, letras, números, punto o guion.'; return; }
+    if (!archivo) { salida.textContent = 'Selecciona un archivo PDF.'; return; }
+    if (!/\.pdf$/i.test(archivo.name) || (archivo.type && archivo.type !== 'application/pdf')) {
+      salida.textContent = 'Solo se admiten archivos PDF.'; return;
+    }
+    if (archivo.size === 0 || archivo.size > ACT73_MAX_PDF) {
+      salida.textContent = 'El PDF debe tener contenido y no superar los 10 MB.'; return;
+    }
+    const form = new FormData();
+    form.append('tipo', tipo);
+    form.append('version', version);
+    form.append('archivo', archivo, archivo.name);
+    conEspera(async () => {
+      try {
+        await apiArchivo('/estudios/' + encodeURIComponent(uuid) + '/documentos-consentimiento', form);
+        await consultarDocumentosAct73(S.fstudy);
+        goProto('d2');
+        toast('Nueva versión registrada correctamente.', 'ok');
+      } catch (err) {
+        const mensaje = err.codigo === 'VERSION_DUPLICADA' ? 'Esa versión ya existe para este tipo de documento.' :
+          err.codigo === 'ARCHIVO_MUY_GRANDE' ? 'El PDF supera 10 MB.' :
+          err.status === 403 ? 'No tienes permiso de carga en este estudio.' :
+          (err.mensaje || 'No se pudo subir el documento.');
+        const aviso = document.getElementById('act73Error');
+        if (aviso) aviso.textContent = mensaje;
+        else toast(mensaje, 'err');
+      }
+    });
+  }, true);
+
+  const act73GoAnterior = go;
+  go = function (id) {
+    if (id === 'a1') {
+      act73Documentos = []; act73EstudioConsultado = null; act73ErrorConsulta = '';
+      return act73GoAnterior(id);
+    }
+    if (!['d1', 'd2'].includes(id) || !R2.token || R2.usuario?.debe_cambiar_password)
+      return act73GoAnterior(id);
+    if (id === 'd2') return conEspera(async () => {
+      await consultarDocumentosAct73(S.fstudy);
+      goProto('d2');
+    });
+    const estudio = STUDIES.find(s => s.id === S.fstudy);
+    if (!estudio) { toast('Selecciona primero un estudio.', 'err'); return go('d2'); }
+    if (estudio.e === 'Cerrado') { toast('No se puede cargar en un estudio cerrado.', 'err'); return; }
+    if (!['Director', 'Investigador', 'Asistente'].includes(S.role)) {
+      toast('Tu rol no permite subir documentos.', 'err'); return;
+    }
+    return goProto('d1');
+  };
+
+
+  // ---------- ACT73_EXPORTACIONES_REAL: API real y ZIP autenticado ----------
+  // Sin endpoint de listado global: se guardan solo IDs de esta sesion;
+  // otro usuario autorizado puede consultar una solicitud con su UUID.
+  const act73ExpConocidas = new Map();
+  let act73ExpUltima = null;
+  let act73ExpSeleccionada = null;
+  const act73ExpUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const act73ExpEstados = {
+    solicitada: 'Pendiente de aprobación',
+    aprobada: 'Aprobada, preparando paquete',
+    lista: 'Lista para descargar',
+    rechazada: 'Rechazada',
+    vencida: 'Vencida'
+  };
+  const act73ExpTextoEstado = e => act73ExpEstados[e] || String(e || '—');
+  const act73ExpFecha = f => f ? new Date(f).toLocaleString('es-CL') : '—';
+  const act73ExpNombreProp = {
+    analisis: 'Análisis',
+    informe: 'Informe',
+    publicacion: 'Publicación'
+  };
+
+  function act73ExpGuardar(x) {
+    if (!x || !act73ExpUuid.test(x.id_exportacion || '')) {
+      throw new Error('La API no entregó un identificador de exportación válido.');
+    }
+    act73ExpConocidas.set(x.id_exportacion, x);
+    return x;
+  }
+
+  function act73ExpListaHTML() {
+    const items = Array.from(act73ExpConocidas.values());
+    if (!items.length) {
+      return '<div class="msg info">No hay solicitudes consultadas en esta sesión. Puedes solicitar una nueva o buscar una existente por su identificador.</div>';
+    }
+    return `<div class="tw"><table>
+      <thead><tr><th>Código</th><th>Propósito</th><th>Fecha</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <tbody>${items.map(x => `<tr>
+        <td><code>${h(x.codigo_exportacion || x.id_exportacion)}</code></td>
+        <td>${h(act73ExpNombreProp[x.proposito] || x.proposito)}</td>
+        <td>${h(act73ExpFecha(x.fecha_solicitud))}</td>
+        <td>${h(act73ExpTextoEstado(x.estado))}</td>
+        <td>
+          <button type="button" class="lnk" data-act="act73ExpVer"
+            data-id="${h(x.id_exportacion)}">Consultar</button>
+          ${x.estado === 'lista' ? ` · <button type="button" class="lnk"
+            data-act="act73ExpBajar" data-id="${h(x.id_exportacion)}">Descargar ZIP</button>` : ''}
+        </td>
+      </tr>`).join('')}</tbody></table></div>`;
+  }
+
+  function act73ExpEstudios() {
+    const actual = [S.fstudy, S.study, S.ceId]
+      .find(c => STUDIES.some(s => s.id === c)) || '';
+    return '<option value="">Selecciona un estudio</option>' +
+      STUDIES.map(s => `<option value="${h(s.id)}" ${s.id === actual ? 'selected' : ''}>
+        ${h(s.id)} · ${h(s.n)}</option>`).join('');
+  }
+
+  R.d3 = () => shell('d3', `<div class="card">
+    <h2 class="t">Solicitar exportación de datos</h2>
+    <p class="sub">La API genera un ZIP desidentificado con participantes elegibles:
+      código E-, estado del consentimiento y mes de inscripción.</p>
+    <form id="act73-exp-solicitar">
+      <div class="fld">
+        <label for="act73-exp-estudio">Estudio</label>
+        <select id="act73-exp-estudio" required>${act73ExpEstudios()}</select>
+      </div>
+      <div class="fld">
+        <label for="act73-exp-proposito">Propósito</label>
+        <select id="act73-exp-proposito" required>
+          <option value="analisis">Análisis</option>
+          <option value="informe">Informe</option>
+          <option value="publicacion">Publicación</option>
+        </select>
+      </div>
+      <div class="msg info">La versión actual no admite filtros personalizados.
+        No se exportan nombres, RUT, contacto ni archivos originales.</div>
+      <div class="acts">
+        <button type="button" class="btn s" data-go="d6">Mis solicitudes</button>
+        <button type="submit" class="btn p">Solicitar exportación</button>
+      </div>
+    </form></div>`);
+
+  R.d4 = () => {
+    const x = act73ExpUltima && act73ExpConocidas.get(act73ExpUltima);
+    if (!x) {
+      return shell('d4', `<div class="card">
+        <h2 class="t">Sin solicitud reciente</h2>
+        <p class="sub">Crea una solicitud para ver su resultado.</p>
+        <div class="acts">${btn('Solicitar exportación', 'd3')}</div></div>`);
+    }
+    return shell('d4', `<div class="card">
+      <div class="check">✓</div>
+      <h2 class="t">Solicitud registrada en la API</h2>
+      <p class="sub">${x.estado === 'solicitada'
+        ? 'Pendiente de la decisión del Investigador responsable.'
+        : 'Consulta su estado y descarga el paquete cuando esté disponible.'}</p>
+      <div class="big">${h(x.codigo_exportacion)}</div>
+      <div class="tw"><table class="sumtbl" style="min-width:0">
+        <tr><td>Identificador para consultas</td>
+          <td><code style="overflow-wrap:anywhere">${h(x.id_exportacion)}</code></td></tr>
+        <tr><td>Propósito</td><td>${h(act73ExpNombreProp[x.proposito] || x.proposito)}</td></tr>
+        <tr><td>Estado</td><td>${h(act73ExpTextoEstado(x.estado))}</td></tr>
+        <tr><td>Vencimiento</td><td>${h(act73ExpFecha(x.fecha_vencimiento))}</td></tr>
+      </table></div>
+      <div class="hint">Conserva el identificador si otra persona autorizada debe aprobarla:
+        la API todavía no ofrece un listado global de solicitudes.</div>
+      <div class="acts">
+        ${btn('Ver solicitudes', 'd6', 's')}
+        ${x.estado === 'lista' ? `<button type="button" class="btn p"
+          data-act="act73ExpBajar" data-id="${h(x.id_exportacion)}">
+          Descargar ZIP</button>` : ''}
+      </div></div>`);
+  };
+
+  R.d6 = () => shell('d6', `<div class="card wide">
+    <h2 class="t">Exportaciones del estudio</h2>
+    <p class="sub">Se muestran solicitudes creadas o consultadas en esta sesión.
+      El backend no dispone aún de un endpoint para listar todas las exportaciones.</p>
+    ${act73ExpListaHTML()}
+    <div class="fld" style="margin-top:18px">
+      <label for="act73-exp-buscar">Consultar solicitud existente por UUID</label>
+      <input id="act73-exp-buscar" type="text" autocomplete="off"
+        placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+      <div class="hint">El servidor solo permite consultar solicitudes propias o del
+        Investigador responsable, con los permisos correspondientes.</div>
+    </div>
+    <div class="acts">
+      <button type="button" class="btn s" data-act="act73ExpBuscar">Consultar ID</button>
+      ${btn('Nueva solicitud', 'd3')}
+    </div></div>`);
+
+  R.d7 = () => {
+    const x = act73ExpSeleccionada && act73ExpConocidas.get(act73ExpSeleccionada);
+    if (!x) {
+      return shell('d7', `<div class="card"><h2 class="t">Selecciona una solicitud</h2>
+        <div class="acts">${btn('Volver', 'd6', 's')}</div></div>`);
+    }
+    return shell('d7', `<div class="card">
+      <h2 class="t">Revisar solicitud · ${h(x.codigo_exportacion)}</h2>
+      <p class="sub">La aprobación está reservada al Investigador responsable del estudio.</p>
+      <div class="tw"><table class="sumtbl" style="min-width:0">
+        <tr><td>UUID</td><td><code style="overflow-wrap:anywhere">${h(x.id_exportacion)}</code></td></tr>
+        <tr><td>Propósito</td><td>${h(act73ExpNombreProp[x.proposito] || x.proposito)}</td></tr>
+        <tr><td>Estado</td><td>${h(act73ExpTextoEstado(x.estado))}</td></tr>
+        <tr><td>Solicitada el</td><td>${h(act73ExpFecha(x.fecha_solicitud))}</td></tr>
+        <tr><td>Vence</td><td>${h(act73ExpFecha(x.fecha_vencimiento))}</td></tr>
+      </table></div>
+      ${x.estado === 'solicitada' ? `<div class="fld" style="margin-top:16px">
+        <label for="act73-exp-motivo">Motivo de la decisión (mínimo 5 caracteres)</label>
+        <textarea id="act73-exp-motivo" rows="3"
+          placeholder="Explica la aprobación o rechazo, sin datos personales"></textarea>
+      </div>` : ''}
+      <div class="acts">
+        ${btn('Volver', 'd6', 's')}
+        ${x.estado === 'solicitada' && S.role === 'Investigador' ? `
+          <button type="button" class="btn s"
+            data-act="act73ExpDecidir" data-decision="rechazar">Rechazar</button>
+          <button type="button" class="btn p"
+            data-act="act73ExpDecidir" data-decision="aprobar">Aprobar</button>` : ''}
+        ${x.estado === 'lista' ? `<button type="button" class="btn p"
+          data-act="act73ExpBajar" data-id="${h(x.id_exportacion)}">Descargar ZIP</button>` : ''}
+      </div></div>`);
+  };
+
+  async function act73ExpConsultar(id) {
+    if (!act73ExpUuid.test(id)) {
+      throw new Error('Escribe un identificador UUID válido.');
+    }
+    return act73ExpGuardar(
+      await api('GET', '/exportaciones/' + encodeURIComponent(id))
+    );
+  }
+
+  async function act73ExpDescargar(id) {
+    const x = await act73ExpConsultar(id);
+    if (x.estado !== 'lista') {
+      throw new Error('La exportación no está disponible para descarga: ' +
+        act73ExpTextoEstado(x.estado));
+    }
+
+    let respuesta;
+    try {
+      respuesta = await fetch(
+        API + '/exportaciones/' + encodeURIComponent(id) + '/descarga',
+        {
+          method: 'GET',
+          headers: { Authorization: 'Bearer ' + R2.token },
+          cache: 'no-store'
+        }
+      );
+    } catch (_) {
+      throw new Error('No se pudo conectar con la API.');
+    }
+
+    if (!respuesta.ok) {
+      let detalle = {};
+      try { detalle = await respuesta.json(); } catch (_) {}
+      throw new Error(detalle.error?.mensaje ||
+        'La descarga fue rechazada por la API (HTTP ' + respuesta.status + ').');
+    }
+
+    const zip = await respuesta.blob();
+    if (!zip.size) throw new Error('La API devolvió un archivo vacío.');
+
+    const nombre = String(x.codigo_exportacion || 'exportacion')
+      .replace(/[^A-Za-z0-9_-]/g, '') + '.zip';
+
+    const enlace = URL.createObjectURL(zip);
+    try {
+      const a = document.createElement('a');
+      a.href = enlace;
+      a.download = nombre;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(enlace), 30000);
+    }
+    toast('Descarga ZIP iniciada.', 'ok');
+  }
+
+  document.addEventListener('submit', e => {
+    if (e.target?.id !== 'act73-exp-solicitar') return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    if (ocupado || !R2.token || R2.usuario?.debe_cambiar_password) return;
+
+    const codigo = document.getElementById('act73-exp-estudio')?.value || '';
+    const proposito = document.getElementById('act73-exp-proposito')?.value || '';
+    const uuid = uuidDe(codigo);
+
+    if (!uuid) {
+      toast('Selecciona un estudio disponible.', 'err');
+      return;
+    }
+    if (!['analisis', 'informe', 'publicacion'].includes(proposito)) {
+      toast('Selecciona un propósito válido.', 'err');
+      return;
+    }
+
+    conEspera(async () => {
+      try {
+        const x = act73ExpGuardar(
+          await api('POST',
+            '/estudios/' + encodeURIComponent(uuid) + '/exportaciones',
+            { proposito, filtros: {} })
+        );
+        act73ExpUltima = x.id_exportacion;
+        S.fstudy = codigo;
+        goProto('d4');
+        toast('Solicitud creada en la API.', 'ok');
+      } catch (err) {
+        toast(err.mensaje || err.message || 'No se pudo solicitar la exportación.', 'err');
+      }
+    });
+  }, true);
+
+  const act73ExpAcciones = new Set([
+    'act73ExpBuscar', 'act73ExpVer', 'act73ExpDecidir', 'act73ExpBajar'
+  ]);
+
+  document.addEventListener('click', e => {
+    const boton = e.target.closest('[data-act]');
+    if (!boton || !act73ExpAcciones.has(boton.dataset.act)) return;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    if (ocupado || !R2.token || R2.usuario?.debe_cambiar_password) return;
+
+    const accion = boton.dataset.act;
+    const id = accion === 'act73ExpBuscar'
+      ? (document.getElementById('act73-exp-buscar')?.value || '').trim()
+      : accion === 'act73ExpDecidir'
+        ? act73ExpSeleccionada
+        : boton.dataset.id;
+
+    conEspera(async () => {
+      try {
+        if (accion === 'act73ExpBajar') {
+          await act73ExpDescargar(id);
+          return;
+        }
+
+        if (accion === 'act73ExpDecidir') {
+          if (S.role !== 'Investigador') {
+            throw new Error('Solo el Investigador responsable puede decidir.');
+          }
+
+          const motivo =
+            (document.getElementById('act73-exp-motivo')?.value || '').trim();
+          const decision = boton.dataset.decision;
+
+          if (motivo.length < 5) {
+            throw new Error('El motivo debe tener al menos 5 caracteres.');
+          }
+          if (!['aprobar', 'rechazar'].includes(decision)) {
+            throw new Error('Decisión inválida.');
+          }
+
+          act73ExpGuardar(
+            await api('PATCH',
+              '/exportaciones/' + encodeURIComponent(id) + '/aprobacion',
+              { decision, motivo })
+          );
+          toast('Decisión registrada por la API.', 'ok');
+          goProto('d7');
+          return;
+        }
+
+        const x = await act73ExpConsultar(id);
+        act73ExpSeleccionada = x.id_exportacion;
+        goProto('d7');
+      } catch (err) {
+        toast(err.mensaje || err.message || 'Operación no disponible.', 'err');
+      }
+    });
+  }, true);
+
+  const act73ExpGoAnterior = go;
+  go = function(id) {
+    if (id === 'a1') {
+      const salida = act73ExpGoAnterior(id);
+      Promise.resolve(salida).then(() => {
+        if (!R2.token) {
+          act73ExpConocidas.clear();
+          act73ExpUltima = null;
+          act73ExpSeleccionada = null;
+        }
+      });
+      return salida;
+    }
+
+    if (!['d3', 'd4', 'd6', 'd7'].includes(id) ||
+        !R2.token || R2.usuario?.debe_cambiar_password) {
+      return act73ExpGoAnterior(id);
+    }
+    return goProto(id);
+  };
+
+  // ---------- ACT73_CUENTAS_REAL: administración de cuentas mediante API ----------
+  let act73Usuarios = [];
+  const act73Roles = ['Director', 'Soporte', 'Investigador', 'Asistente', 'Estudiante', 'Invitado'];
+  const act73FechaCorta = f => f ? String(f).slice(0, 10) : '—';
+
+  // La contraseña temporal solo se muestra una vez, sin guardarla en storage.
+  const act73ClaveDialogo = document.createElement('div');
+  act73ClaveDialogo.id = 'act73-clave-dialogo';
+  act73ClaveDialogo.setAttribute('role', 'dialog');
+  act73ClaveDialogo.setAttribute('aria-modal', 'true');
+  act73ClaveDialogo.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(11,14,50,.85);z-index:10020;align-items:center;justify-content:center;padding:16px';
+  act73ClaveDialogo.innerHTML = `<div style="background:#fff;border-radius:16px;padding:24px;width:100%;max-width:440px;color:#131315;font-family:Inter,Arial,sans-serif">
+    <h2 style="color:#000B78;margin:0 0 10px">Contraseña temporal</h2>
+    <p id="act73-clave-cuenta" style="overflow-wrap:anywhere"></p>
+    <p style="font-size:13px">Cópiala y entrégala mediante un canal seguro. No volverá a mostrarse al cerrar esta ventana.</p>
+    <div id="act73-clave-valor" style="font-size:20px;font-weight:700;letter-spacing:.04em;padding:12px;background:#f2f3fa;border-radius:8px;user-select:all;overflow-wrap:anywhere"></div>
+    <button type="button" id="act73-clave-cerrar" class="btn p" style="margin-top:18px">Ya la guardé; cerrar</button>
+  </div>`;
+
+  document.body.appendChild(act73ClaveDialogo);
+
+  function act73OcultarClave() {
+    act73ClaveDialogo.querySelector('#act73-clave-valor').textContent = '';
+    act73ClaveDialogo.querySelector('#act73-clave-cuenta').textContent = '';
+    act73ClaveDialogo.style.display = 'none';
+  }
+
+  function act73MostrarClave(correo, clave) {
+    act73ClaveDialogo.querySelector('#act73-clave-cuenta').textContent = 'Cuenta: ' + correo;
+    act73ClaveDialogo.querySelector('#act73-clave-valor').textContent = clave;
+    act73ClaveDialogo.style.display = 'flex';
+    act73ClaveDialogo.querySelector('#act73-clave-cerrar').focus();
+  }
+
+  act73ClaveDialogo.querySelector('#act73-clave-cerrar')
+    .addEventListener('click', act73OcultarClave);
+
+  const act73AdminPermitido = () =>
+    R2.token && !R2.usuario?.debe_cambiar_password &&
+    ['Director', 'Soporte'].includes(S.role);
+
+  const act73PantallaCuentas = () => S.role === 'Soporte' ? 'e3' : 'e1';
+
+  async function act73CargarUsuarios() {
+    act73Usuarios = lista(await api('GET', '/usuarios'));
+  }
+
+  function act73FilaUsuario(u) {
+    const puedeGestionar = S.role === 'Director' || u.nombre_rol !== 'Director';
+    const esPropio = u.correo?.toLowerCase() === R2.usuario?.correo?.toLowerCase();
+    const esDirector = S.role === 'Director';
+
+    const opcionesRol = act73Roles
+      .filter(r => esDirector || r !== 'Director')
+      .map(r => `<option value="${h(r)}" ${r === u.nombre_rol ? 'selected' : ''}>${h(r)}</option>`)
+      .join('');
+
+    return `<tr>
+      <td><b>${h(u.nombre)}</b><div class="hint">${h(u.correo)}</div><div class="hint">UUID: <code>${h(u.id_usuario)}</code></div></td>
+      <td>${puedeGestionar && !esPropio
+        ? `<select data-act73-rol="1" aria-label="Rol de ${h(u.correo)}">${opcionesRol}</select>
+           <button type="button" class="lnk" data-act="act73UserRol"
+             data-id="${h(u.id_usuario)}">Guardar rol</button>`
+        : h(u.nombre_rol)}</td>
+      <td>${u.activo
+        ? '<span class="pill ok">Activa</span>'
+        : '<span class="pill err">Bloqueada</span>'}</td>
+      <td>${u.mfa_activo ? 'Configurado' : 'Pendiente'}</td>
+      <td>${h(act73FechaCorta(u.fecha_expiracion))}</td>
+      <td>${puedeGestionar && !esPropio ? `
+        <button type="button" class="lnk" data-act="act73UserBloqueo"
+          data-id="${h(u.id_usuario)}"
+          data-activo="${u.activo ? 'false' : 'true'}">
+          ${u.activo ? 'Bloquear' : 'Activar'}
+        </button> ·
+        <button type="button" class="lnk" data-act="act73UserClave"
+          data-id="${h(u.id_usuario)}">Restablecer clave</button> ·
+        <button type="button" class="lnk" data-act="act73UserMfa"
+          data-id="${h(u.id_usuario)}">Reiniciar MFA</button>
+        ` : 'Sin permisos'}
+      </td>
+    </tr>`;
+  }
+
+  function act73RenderUsuarios(pantalla) {
+    const titulo = pantalla === 'e3' ? 'Cuentas de usuario' : 'Usuarios y roles';
+
+    return shell(pantalla, `<div class="card wide">
+      <div class="top" style="margin:0 0 14px">
+        <div>
+          <h2 class="t">${titulo}</h2>
+          <p class="sub" style="margin:0">
+            Cuentas obtenidas de la API real. Los cambios se auditan en el servidor.
+          </p>
+        </div>
+        ${btn('+ Nueva cuenta', 'e2')}
+      </div>
+
+      <div class="tw"><table>
+        <thead><tr>
+          <th>Nombre / correo</th><th>Rol</th><th>Estado</th>
+          <th>MFA</th><th>Vence</th><th>Acciones</th>
+        </tr></thead>
+        <tbody>${act73Usuarios.map(act73FilaUsuario).join('') ||
+          '<tr><td colspan="6">No hay cuentas disponibles.</td></tr>'}</tbody>
+      </table></div>
+
+      <div class="hint" style="margin-top:12px">
+        Solo Director puede administrar cuentas de Director.
+        Restablecer una contraseña o reiniciar MFA puede cerrar sesiones activas.
+      </div>
+    </div>`);
+  }
+
+  R.e1 = () => act73RenderUsuarios('e1');
+  R.e3 = () => act73RenderUsuarios('e3');
+
+  R.e2 = () => shell('e2', `<div class="card">
+    <h2 class="t">Crear cuenta</h2>
+    <p class="sub">
+      La API entrega una contraseña temporal que se muestra una sola vez.
+    </p>
+
+    <form id="act73-user-form">
+      <div class="fld">
+        <label for="act73-user-nombre">Nombre</label>
+        <input id="act73-user-nombre" required maxlength="150" autocomplete="off">
+      </div>
+      <div class="fld">
+        <label for="act73-user-correo">Correo</label>
+        <input id="act73-user-correo" type="email" required autocomplete="off">
+      </div>
+      <div class="fld">
+        <label for="act73-user-rol">Rol</label>
+        <select id="act73-user-rol">
+          ${act73Roles
+            .filter(r => S.role === 'Director' || r !== 'Director')
+            .map(r => `<option value="${h(r)}">${h(r)}</option>`)
+            .join('')}
+        </select>
+      </div>
+      <div class="fld">
+        <label for="act73-user-fin">
+          Fecha de término (requerida para roles temporales)
+        </label>
+        <input id="act73-user-fin" type="date">
+        <div class="hint">
+          El servidor valida qué roles necesitan fecha de expiración.
+        </div>
+      </div>
+      <div class="acts">
+        <button class="btn s" type="button"
+          data-go="${act73PantallaCuentas()}">Cancelar</button>
+        <button type="submit" class="btn p">Crear cuenta</button>
+      </div>
+    </form>
+  </div>`);
+
+  document.addEventListener('submit', e => {
+    if (e.target?.id !== 'act73-user-form') return;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    if (ocupado || !act73AdminPermitido()) return;
+
+    const nombre = (document.getElementById('act73-user-nombre')?.value || '').trim();
+    const correo = (document.getElementById('act73-user-correo')?.value || '')
+      .trim().toLowerCase();
+    const rol = document.getElementById('act73-user-rol')?.value || '';
+    const fecha = document.getElementById('act73-user-fin')?.value || '';
+
+    if (!nombre || !correo || !act73Roles.includes(rol)) {
+      return toast('Completa los campos obligatorios.', 'err');
+    }
+
+    conEspera(async () => {
+      try {
+        const creado = await api('POST', '/usuarios', {
+          nombre,
+          correo,
+          rol,
+          ...(fecha ? { fecha_expiracion: fecha } : {})
+        });
+
+        try {
+          await act73CargarUsuarios();
+          goProto(act73PantallaCuentas());
+        } catch (_) {
+          toast('Cuenta creada; no se pudo actualizar el listado.', 'err');
+        }
+
+        if (creado.password_temporal) {
+          act73MostrarClave(creado.correo || correo, creado.password_temporal);
+        } else {
+          toast('Cuenta creada sin contraseña temporal en la respuesta.', 'err');
+        }
+      } catch (err) {
+        toast(err.mensaje || err.message || 'No se pudo crear la cuenta.', 'err');
+      }
+    });
+  }, true);
+
+  const act73AccionesUsuario = new Set([
+    'act73UserBloqueo',
+    'act73UserClave',
+    'act73UserMfa',
+    'act73UserRol'
+  ]);
+
+  document.addEventListener('click', e => {
+    const boton = e.target.closest('[data-act]');
+    if (!boton || !act73AccionesUsuario.has(boton.dataset.act)) return;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    if (ocupado || !act73AdminPermitido()) return;
+
+    const user = act73Usuarios.find(u => u.id_usuario === boton.dataset.id);
+
+    if (!user) {
+      return toast('La cuenta ya no está disponible. Actualiza el listado.', 'err');
+    }
+
+    if (S.role !== 'Director' && user.nombre_rol === 'Director') {
+      return toast('No tienes permiso para administrar Director.', 'err');
+    }
+
+    const accion = boton.dataset.act;
+    const cuerpo =
+      accion === 'act73UserBloqueo' ? { activo: boton.dataset.activo === 'true' } :
+      accion === 'act73UserClave' ? { restablecer_password: true } :
+      accion === 'act73UserMfa' ? { reiniciar_mfa: true } :
+      { rol: boton.closest('tr')?.querySelector('select[data-act73-rol]')?.value };
+
+    if (
+      accion === 'act73UserRol' &&
+      (!act73Roles.includes(cuerpo.rol) || cuerpo.rol === user.nombre_rol)
+    ) {
+      return toast('Selecciona un rol diferente.', 'err');
+    }
+
+    const textoAccion =
+      accion === 'act73UserBloqueo' ? (cuerpo.activo ? 'activar' : 'bloquear') :
+      accion === 'act73UserClave' ? 'restablecer la contraseña de' :
+      accion === 'act73UserMfa' ? 'reiniciar el MFA de' :
+      'cambiar el rol de';
+
+    if (!confirm(`¿Confirmas ${textoAccion} ${user.correo}?`)) return;
+
+    conEspera(async () => {
+      try {
+        const actualizado = await api(
+          'PATCH',
+          '/usuarios/' + encodeURIComponent(user.id_usuario),
+          cuerpo
+        );
+
+        try {
+          await act73CargarUsuarios();
+          goProto(act73PantallaCuentas());
+        } catch (_) {
+          toast('Cambio aplicado; no se pudo actualizar el listado.', 'err');
+        }
+
+        if (actualizado.password_temporal) {
+          act73MostrarClave(user.correo, actualizado.password_temporal);
+        } else {
+          toast('Cambio aplicado en la API.', 'ok');
+        }
+      } catch (err) {
+        toast(err.mensaje || err.message || 'No se pudo actualizar la cuenta.', 'err');
+      }
+    });
+  }, true);
+
+  const act73CuentasGoAnterior = go;
+
+  go = function(id) {
+    if (id === 'a1') {
+      const salida = act73CuentasGoAnterior(id);
+
+      Promise.resolve(salida).then(() => {
+        if (!R2.token) {
+          act73Usuarios = [];
+          act73OcultarClave();
+        }
+      });
+
+      return salida;
+    }
+
+    if (!['e1', 'e2', 'e3'].includes(id)) {
+      return act73CuentasGoAnterior(id);
+    }
+
+    if (!act73AdminPermitido()) {
+      toast('Solo Director y Soporte pueden administrar cuentas.', 'err');
+      return;
+    }
+
+    if (id === 'e2') return goProto('e2');
+
+    return conEspera(async () => {
+      try {
+        await act73CargarUsuarios();
+        goProto(id);
+      } catch (err) {
+        toast(
+          err.mensaje || err.message || 'No se pudieron consultar las cuentas.',
+          'err'
+        );
+      }
+    });
+  };
+
+  // ---------- ACT73_ASIGNAR_ESTUDIO_REAL: asignación mínima de usuarios ----------
+  const act73AsigUuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  let act73AsigEstudio = null;
+  let act73AsigMiembros = [];
+
+  async function act73AsigConsultar(codigo) {
+    const id = uuidDe(codigo);
+    if (!id) throw new Error('Selecciona un estudio válido.');
+    const respuesta = await api(
+      'GET', '/estudios/' + encodeURIComponent(id) + '/membresias'
+    );
+    act73AsigMiembros = lista(respuesta);
+    act73AsigEstudio = codigo;
+  }
+
+  R.c4 = () => {
+    const codigo = act73AsigEstudio || S.ceId;
+    const estudio = STUDIES.find(s => s.id === codigo);
+
+    return shell('c1', `<div class="card wide">
+      <h2 class="t">Asignar usuario a un estudio</h2>
+      <p class="sub">Consulta las membresías reales y asigna una cuenta existente.
+        El servidor verifica los permisos del Investigador.</p>
+
+      <div class="fld" style="max-width:580px">
+        <label for="act73-asig-estudio">Estudio</label>
+        <select id="act73-asig-estudio">
+          ${STUDIES.map(s =>
+            `<option value="${h(s.id)}" ${s.id === codigo ? 'selected' : ''}>
+              ${h(s.id)} · ${h(s.n)}
+            </option>`
+          ).join('')}
+        </select>
+      </div>
+
+      ${estudio ? `<div class="msg info">
+        Estudio: <b>${h(estudio.id)} · ${h(estudio.n)}</b>
+      </div>` : ''}
+
+      <h3 style="font-size:16px;margin:18px 0 8px">Integrantes actuales</h3>
+      <div class="tw"><table>
+        <tr><th>Nombre</th><th>Rol</th><th>Consultar</th><th>Vence</th></tr>
+        ${act73AsigMiembros.map(m => `<tr>
+          <td>${h(m.nombre)}<div class="hint">${h(m.correo)}</div></td>
+          <td>${h(m.nombre_rol)}</td>
+          <td>${m.puede_consultar ? 'Sí' : 'No'}</td>
+          <td>${h(m.fecha_fin ? String(m.fecha_fin).slice(0, 10) : '—')}</td>
+        </tr>`).join('') ||
+        '<tr><td colspan="4">No hay membresías vigentes visibles.</td></tr>'}
+      </table></div>
+
+      <h3 style="font-size:16px;margin:20px 0 8px">Nueva asignación</h3>
+
+      <form id="act73-asig-form">
+        <div class="fld">
+          <label for="act73-asig-usuario">UUID del usuario</label>
+          <input id="act73-asig-usuario" required maxlength="36"
+            autocomplete="off"
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+          <div class="hint">
+            El UUID se consulta desde Equipo y roles con una cuenta de Director.
+          </div>
+        </div>
+
+        <div class="fld">
+          <label for="act73-asig-fin">Acceso hasta (opcional)</label>
+          <input id="act73-asig-fin" type="date">
+        </div>
+
+        <div class="msg info">
+          La asignación otorgará solo el permiso <b>Consultar</b>.
+          Los demás permisos permanecerán desactivados.
+        </div>
+
+        <div class="acts">
+          ${btn('Volver', 'c3', 's')}
+          <button type="submit" class="btn p">
+            Asignar a este estudio
+          </button>
+        </div>
+      </form>
+    </div>`);
+  };
+
+  document.addEventListener('change', e => {
+    if (e.target?.id !== 'act73-asig-estudio' ||
+        ocupado || S.role !== 'Investigador') return;
+
+    const codigo = e.target.value;
+
+    conEspera(async () => {
+      try {
+        await act73AsigConsultar(codigo);
+        S.ceId = codigo;
+        goProto('c4');
+      } catch (err) {
+        toast(err.mensaje || err.message ||
+          'No fue posible cargar las membresías.', 'err');
+      }
+    });
+  });
+
+  document.addEventListener('submit', e => {
+    if (e.target?.id !== 'act73-asig-form') return;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    if (ocupado || !R2.token || S.role !== 'Investigador' ||
+        R2.usuario?.debe_cambiar_password) return;
+
+    const usuario =
+      (document.getElementById('act73-asig-usuario')?.value || '').trim();
+    const fin =
+      document.getElementById('act73-asig-fin')?.value || '';
+
+    if (!act73AsigUuidRe.test(usuario)) {
+      return toast('Introduce un UUID válido.', 'err');
+    }
+
+    const idEstudio = uuidDe(act73AsigEstudio);
+
+    if (!idEstudio) {
+      return toast('Estudio no disponible.', 'err');
+    }
+
+    if (!confirm('¿Asignar este usuario al estudio con permiso de consulta?')) {
+      return;
+    }
+
+    conEspera(async () => {
+      try {
+        await api(
+          'POST',
+          '/estudios/' + encodeURIComponent(idEstudio) + '/membresias',
+          {
+            id_usuario: usuario,
+            puede_consultar: true,
+            ...(fin ? { fecha_fin: fin } : {})
+          }
+        );
+
+        await act73AsigConsultar(act73AsigEstudio);
+        goProto('c4');
+        toast('Usuario asignado al estudio correctamente.', 'ok');
+      } catch (err) {
+        toast(err.mensaje || err.message ||
+          'No se pudo asignar el usuario.', 'err');
+      }
+    });
+  }, true);
+
+  const act73AsigGoAnterior = go;
+
+  go = function(id) {
+    if (id === 'a1') {
+      const salida = act73AsigGoAnterior(id);
+
+      Promise.resolve(salida).then(() => {
+        if (!R2.token) {
+          act73AsigEstudio = null;
+          act73AsigMiembros = [];
+        }
+      });
+
+      return salida;
+    }
+
+    if (id !== 'c4') return act73AsigGoAnterior(id);
+
+    if (S.role !== 'Investigador' || !R2.token ||
+        R2.usuario?.debe_cambiar_password) {
+      toast('Solo el Investigador autorizado puede asignar usuarios.', 'err');
+      return;
+    }
+
+    return conEspera(async () => {
+      try {
+        await act73AsigConsultar(S.ceId || STUDIES[0]?.id);
+        goProto('c4');
+      } catch (err) {
+        toast(err.mensaje || err.message ||
+          'No se pudo consultar el equipo.', 'err');
+      }
+    });
+  };
+
   // Arranque: siempre desde el ingreso
   S.err = false; goProto('a1');
 })();
