@@ -48,8 +48,7 @@
   .rl-qrlink{display:inline-block;margin:2px 0 8px;border:0;background:none;color:#1C2FB9;font:600 13px Inter,Arial,sans-serif;text-decoration:underline;cursor:pointer;padding:0}
   .rl-ver:hover{background:#DDE2FF}.rl-ver:focus-visible{outline:2px solid #253FF6;outline-offset:2px}`;
   document.head.appendChild(css);
-
-  const badge = document.createElement('div'); badge.id = 'rl-badge'; badge.innerHTML = '<i></i>Conectado a la API real';
+  const badge = document.createElement('div'); badge.id = 'rl-badge'; badge.innerHTML = '<i></i>Comprobando conexión…';
   const cel = document.createElement('div'); cel.id = 'rl-cel';
   cel.innerHTML = '<small>Celular simulado · app de autenticación</small><div class="c" title="Clic para copiarlo al campo">------</div><div class="b"><div></div></div><small style="margin-top:6px" id="rl-cel-u"></small>';
   const toastEl = document.createElement('div'); toastEl.id = 'rl-toast';
@@ -81,7 +80,7 @@
     if (conToken && R2.token) cab.Authorization = 'Bearer ' + R2.token;
     let r, j = {};
     try { r = await fetch(API + ruta, { method: metodo, headers: cab, cache: 'no-store', body: cuerpo ? JSON.stringify(cuerpo) : undefined }); }
-    catch (e) { throw { codigo: 'SIN_RED', mensaje: 'No se pudo contactar el servidor de la demo.' }; }
+    catch (e) { throw { codigo: 'SIN_RED', mensaje: 'No se pudo conectar con el servidor. Revisa tu conexión e intenta nuevamente.' }; }
     try { j = await r.json(); } catch (e) { /* sin cuerpo */ }
     if (!r.ok) throw Object.assign({ status: r.status }, j.error || { codigo: 'ERROR', mensaje: 'Error ' + r.status });
     return j;
@@ -126,7 +125,7 @@
   const flujoConsentimiento = window.PlaGesConsentimiento;
   if (!flujoConsentimiento) throw new Error('No se cargó consentimiento-integracion.js');
 
-  api('GET', '/salud', null, false).then(() => badge.classList.remove('off')).catch(() => { badge.classList.add('off'); badge.innerHTML = '<i></i>API apagada: ejecuta «docker compose up -d»'; });
+  api('GET', '/salud', null, false).then(() => { badge.classList.remove('off'); badge.innerHTML = '<i></i>Servidor disponible al iniciar'; }).catch(() => { badge.classList.add('off'); badge.innerHTML = '<i></i>No se pudo comprobar la conexión'; });
 
   // ---------- celular simulado ----------
   setInterval(async () => {
@@ -470,7 +469,7 @@
     try { await cargarParticipantes(codigoEstudio); } catch (_) { /* la ficha igual se actualizó */ }
     R2.eventoTipo = null;
     R2.documentoReconsentimiento = null;
-    toast(tipo === 'retirar' ? 'Retiro registrado en la API.' : 'Reconsentimiento registrado en la API.', 'ok');
+    toast(tipo === 'retirar' ? 'Retiro registrado.' : 'Reconsentimiento registrado.', 'ok');
     goProto('c6');
   }
 
@@ -695,7 +694,7 @@
           R2.tmp = r.token_temporal; S.first = false; S.otpErr = '';
           goProto('a2');
         } catch (e) {
-          S.err = true; S.errMsg = e.codigo === 'MFA_PENDIENTE' ? 'Tu cuenta aún no tiene configurada la verificación en dos pasos (se habilita en la Act. 74).' : e.codigo === 'DEMASIADOS_INTENTOS' ? e.mensaje : 'Usuario o contraseña incorrectos.';
+          S.err = true; S.errMsg = e.codigo === 'MFA_PENDIENTE' ? 'Tu cuenta aún no tiene configurada la verificación en dos pasos. Contacta a Soporte.' : e.codigo === 'CREDENCIALES_INVALIDAS' ? 'Correo o contraseña incorrectos.' : e.codigo === 'DEMASIADOS_INTENTOS' ? 'Demasiados intentos. Espera un momento antes de volver a ingresar.' : e.codigo === 'SIN_RED' ? e.mensaje : 'No se pudo iniciar sesión. Intenta nuevamente más tarde.';
           render();
         }
       });
@@ -773,8 +772,8 @@
     if (!R2.token && !id.startsWith('a')) { toast('Primero inicia sesión.', 'err'); return goProto('a1'); }
 
     // Estudios y participantes
-    if (id === 'c1') return conEspera(async () => { try { await cargarEstudios(); } catch (e) { toast(e.mensaje || 'No se pudieron cargar los estudios', 'err'); } goProto('c1'); });
-    if (id === 'c3') return conEspera(async () => { try { await cargarParticipantes(S.ceId); } catch (e) { toast(e.mensaje || 'Sin permiso para ver participantes', 'err'); return; } goProto('c3'); });
+    if (id === 'c1') return conEspera(async () => { try { await cargarEstudios(); } catch (e) { toast(e.mensaje || 'No se pudieron cargar los estudios. Intenta nuevamente.', 'err'); } goProto('c1'); });
+    if (id === 'c3') return conEspera(async () => { try { await cargarParticipantes(S.ceId); } catch (e) { toast(e.mensaje || 'No se pudieron cargar los participantes. Intenta nuevamente.', 'err'); return; } goProto('c3'); });
     if (id === 'b3' && !S.recons) {
       return conEspera(async () => {
         try { await documentosVigentes(); goProto('b3'); }
