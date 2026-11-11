@@ -14,3 +14,6 @@ uploads/
 .DS_Store
 backend/setup_mfa_tests.js
 backend/datos_para_act45.sql
+backend/consentimiento_v1.0.pdf
+backend/datos_para_act55.sql
+backend/evidencia_prueba.txt
