@@ -69,17 +69,125 @@ Contrato según ADR-002 D12–D15 y Matriz v3. Ejemplos y tabla de roles: [Guía
 
 ## 2. Autenticación y MFA
 
-Login en dos pasos (contraseña + TOTP), códigos de recuperación y control de sesiones (objetivo 7, RNF-SEC-04). No pasan por el RBAC por estudio.
+Contrato revisado en `feature/act74-seguridad`, commit `e8f96f21b9aafc5dba7c85bc0061140f2afe8772`.
 
-| Recurso                 | Rol autorizado                | Permiso en estudio | Entrada                                             | Salida                                                                                                                        |
-|-------------------------|-------------------------------|--------------------|-----------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------|
-| POST`/auth/login`       | Público                       | — (público)        | correo, contraseña                                  | token_temporal para el paso MFA, o error 401. Indica si `debe_cambiar_password` o si falta enrolar el MFA.                    |
-| POST`/auth/login/mfa`   | Público (con token_temporal)  | — (público)        | token_temporal, codigo_totp *o* codigo_recuperacion | JWT de sesión; crea la fila en `sesion_usuario`. Un código de recuperación queda marcado como `usado`.                        |
-| POST`/auth/mfa/enrolar` | Cualquier usuario autenticado | — (global)         | —                                                   | QR de enrolamiento + 10 códigos de recuperación (se muestran una sola vez); `mfa_activo: true` al confirmar el primer código. |
-| POST`/auth/mfa/codigos` | Cualquier usuario autenticado | — (global)         | codigo_totp                                         | Nuevos códigos de recuperación; invalida los anteriores.                                                                      |
-| POST`/auth/password`    | Cualquier usuario autenticado | — (global)         | password_actual, password_nueva                     | Confirmación; `debe_cambiar_password: false`.                                                                                 |
-| POST`/auth/logout`      | Cualquier usuario autenticado | — (global)         | —                                                   | Cierra la `sesion_usuario` actual (`fecha_cierre`).                                                                           |
+Describe el código disponible en esa rama. No certifica integración en `develop` ni pruebas aprobadas.
 
+Las rutas se expresan sin prefijo `/api/v1`; el proxy de demostración utiliza `/api`.
+
+### Rutas y respuestas
+
+| Método y ruta | Acceso | Entrada JSON | Respuesta correcta (200) |
+|---|---|---|---|
+| `POST /auth/login` | Público; cuenta activa y no vencida | `correo`, `password` | Con MFA activo: `token_temporal`, `mfa_requerido: true`, `expira_en_segundos: 300`. Sin MFA activo: `token_temporal`, `enrolamiento_requerido: true`, `expira_en_segundos: 300`. No entrega una sesión en este paso. |
+| `POST /auth/mfa/enrolar` | Token temporal de tipo `enrolar` en el cuerpo; no requiere sesión Bearer | `token_temporal` | `otpauth_uri`, `secreto`. El secreto se guarda cifrado y MFA permanece inactivo. El frontend debe representar la URI como QR. |
+| `POST /auth/mfa/confirmar` | Token temporal de tipo `enrolar` | `token_temporal`, `codigo` TOTP | `codigos_recuperacion` (diez), nuevo `token_temporal` de tipo `mfa`, `expira_en_segundos: 300`. Activa MFA después de un código válido. No entrega una sesión todavía. |
+| `POST /auth/login/mfa` | Token temporal de tipo `mfa` | `token_temporal` y exactamente uno: `codigo` o `codigo_recuperacion` | `token` de sesión, `expira_por_inactividad` y `usuario` con `nombre`, `correo`, `rol`, `debe_cambiar_password`. |
+| `POST /auth/password` | `Authorization: Bearer <TOKEN_SESION>`; permitida con cambio obligatorio pendiente | `password_actual`, `password_nueva` | `{"mensaje":"Contraseña actualizada."}`. Elimina la obligación de cambio. |
+| `POST /auth/logout` | Sesión Bearer; permitida con cambio obligatorio pendiente | Sin campos obligatorios | `{"mensaje":"Sesión cerrada."}`. Cierra la sesión actual. |
+
+`POST /auth/mfa/codigos` pertenece al diseño previo, pero no está montada en la rama revisada. La regeneración de códigos mediante esa ruta queda pendiente.
+
+### Flujo de primer ingreso
+
+1. Enviar correo y contraseña a `/auth/login`. Si devuelve `enrolamiento_requerido: true`, utilizar el token temporal para enrolar y confirmar.
+2. Solicitar el enrolamiento y mostrar el QR generado desde `otpauth_uri`. La respuesta contiene material secreto y no debe incluirse en registros ni capturas compartidas.
+3. Enviar el primer TOTP a `/auth/mfa/confirmar`. Un código inválido no activa MFA.
+4. La confirmación correcta activa MFA, guarda los hashes de diez códigos de recuperación y entrega esos códigos al usuario para que los conserve de forma segura.
+5. Utilizar el nuevo token de tipo `mfa` en `/auth/login/mfa`, junto con un código válido, para obtener la sesión.
+6. Si `debe_cambiar_password` es verdadero, cambiar la contraseña antes del acceso operativo. Con esa condición, el middleware permite únicamente `/auth/password` y `/auth/logout`.
+
+Volver a llamar a enrolar mientras MFA sigue inactivo genera un nuevo secreto pendiente; el QR anterior deja de corresponder. La implementación no limita la emisión del QR a una sola llamada. Si MFA ya está activo, responde 409.
+
+El frontend revisado todavía consulta el QR de demostración mediante `/otpauth` y no implementa este flujo completo. La conexión con enrolar y confirmar queda pendiente.
+
+### Política de contraseña
+
+**Regla requerida por la Actividad 74:**
+
+- Mínimo 12 caracteres.
+- Distinta del correo.
+- Aplicación en cambio de contraseña y creación de usuarios.
+
+**Comportamiento observado:**
+
+- El cambio exige un mínimo de 12 caracteres.
+- La contraseña nueva debe ser distinta de la actual.
+- Se valida la contraseña actual antes del cambio.
+- La contraseña nueva se almacena mediante Argon2id.
+- El alta y restablecimiento de usuarios generan una contraseña temporal de 14 caracteres desde el servidor.
+- El alta no recibe una contraseña elegida por el administrador.
+- La cuenta exige un cambio posterior de contraseña.
+
+**Pendiente:** incorporar la comparación explícita con el correo y verificar la regla completa en alta, restablecimiento y cambio.
+
+### Errores y límites
+
+| HTTP / código | Situación |
+|---|---|
+| `400 SOLICITUD_INVALIDA` | Campos obligatorios ausentes, contraseña nueva corta o igual a la actual, selección incorrecta entre TOTP y recuperación, o confirmación sin haber generado el QR. |
+| `401 CREDENCIALES_INVALIDAS` | Login inválido, incluida cuenta bloqueada o vencida, con mensaje genérico; también contraseña actual incorrecta durante el cambio. |
+| `401 TOKEN_TEMPORAL_INVALIDO` | Token temporal inválido o vencido. |
+| `401 NO_AUTENTICADO` | Token de tipo incorrecto, cuenta no utilizable en enrolamiento o confirmación, o sesión no válida. |
+| `401 CODIGO_INVALIDO` | TOTP incorrecto, código de recuperación inválido o usado en login MFA, o TOTP incorrecto en confirmación. |
+| `409 MFA_YA_ACTIVO` | Intento de enrolar o confirmar una cuenta que ya tiene MFA activo. |
+| `429` | Límite de solicitudes. `DEMASIADOS_INTENTOS` identifica el control de fallos de autenticación. |
+
+Los tokens temporales duran 300 segundos.
+
+La sesión tiene un límite de 30 minutos de inactividad y una duración máxima de 8 horas.
+
+Login, login MFA, enrolar y confirmar comparten el limitador de rutas configurado a 20 solicitudes por minuto. Login y las verificaciones MFA aplican además el control de cinco fallos en una ventana de 15 minutos.
+
+### Ejemplos de solicitud
+
+Los siguientes ejemplos muestran el formato de las solicitudes. No constituyen pruebas ejecutadas ni contienen credenciales reales.
+
+**Generar el enrolamiento:**
+
+```http
+POST /auth/mfa/enrolar
+Content-Type: application/json
+
+{
+  "token_temporal": "<TOKEN_DE_ENROLAMIENTO>"
+}
+```
+
+**Confirmar el primer código:**
+
+```http
+POST /auth/mfa/confirmar
+Content-Type: application/json
+
+{
+  "token_temporal": "<TOKEN_DE_ENROLAMIENTO>",
+  "codigo": "<TOTP_ACTUAL>"
+}
+```
+
+**Cambiar la contraseña:**
+
+```http
+POST /auth/password
+Authorization: Bearer <TOKEN_DE_SESION>
+Content-Type: application/json
+
+{
+  "password_actual": "<ACTUAL>",
+  "password_nueva": "<NUEVA_DE_AL_MENOS_12_CARACTERES>"
+}
+```
+
+### Trazabilidad y pendientes
+
+El enrolamiento y la confirmación correctos marcan la acción `actualizar` sobre la entidad `usuario`. Un código incorrecto en confirmación marca `login_fallido`.
+
+Debe comprobarse que los registros efectivos y sus resultados queden en la auditoría.
+
+La actualización del catálogo no acredita por sí sola el cierre de CA-17 ni de la Actividad 74. Quedan pendientes la integración del frontend, la comparación de contraseña con correo y las evidencias de las pruebas correspondientes.
+
+Ver [controles de seguridad](../seguridad/controles.md).
 </div>
 
 <div class="section">
